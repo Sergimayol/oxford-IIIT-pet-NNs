@@ -37,9 +37,7 @@ if __name__ == "__main__":
     logger = get_logger("cat_dog_classifier.log")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    path = os.path.join(DATA_DIR, "models", "cat_dog_classifier-20231217152013-25.pth")
     model = CatDogClassifier().to(device)
-    model.load_state_dict(torch.load(path))
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
