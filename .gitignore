@@ -156,3 +156,5 @@ cython_debug/
 
 data/annotations/**
 data/images/**
+data/models/**
+data/tests/**

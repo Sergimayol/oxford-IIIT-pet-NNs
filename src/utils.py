@@ -2,8 +2,10 @@ import os
 import tarfile
 import urllib.request
 from tqdm import tqdm
+from PIL import Image
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+IMAGES_DIR = os.path.join(DATA_DIR, "images")
 DATASET_URL = "https://thor.robots.ox.ac.uk/~vgg/data/pets/images.tar.gz"
 DATASET_GROUND_TRUTH_URL = "https://thor.robots.ox.ac.uk/~vgg/data/pets/annotations.tar.gz"
 
@@ -57,3 +59,27 @@ def download_dataset(
         with tarfile.open(os.path.join(data_dir, ground_truth_filename)) as tar:
             for member in tqdm(iterable=tar.getmembers(), total=len(tar.getmembers()), desc="Extracting " + ground_truth_filename):
                 tar.extract(member, path=data_dir)
+
+
+def read_image(path: str):
+    """
+    Read an image from the disk.
+    """
+    return Image.open(path).convert("RGB")
+
+
+def get_logger(file_name: str = "model.log"):
+    """
+    Create a logger.
+    """
+    import logging
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        filename="./logs/" + file_name,
+        filemode="a",
+    )
+    logger = logging.getLogger(__name__)
+    return logger
