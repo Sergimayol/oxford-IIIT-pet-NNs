@@ -1,9 +1,9 @@
 import os
+import uuid
 import torch
 import torch.nn as nn
 from tqdm import tqdm
 from typing import Tuple
-from datetime import datetime
 from torchvision import transforms
 from torch.utils.data import DataLoader
 
@@ -22,41 +22,47 @@ def load_dataset() -> Tuple[DataLoader, DataLoader]:
             transforms.Resize((256, 256)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=0.5),
+            transforms.RandomRotation(degrees=45),
+            transforms.RandomAffine(degrees=45, translate=(0.1, 0.1), scale=(0.8, 1.2), shear=45),
+            transforms.RandomPerspective(distortion_scale=0.5, p=0.5),
         ]
     )
     train_dataset = CatDogDataset(csv_file=os.path.join(DATA_DIR, "annotations", "train.csv"), root_dir=IMAGES_DIR, transform=transform)
     test_dataset = CatDogDataset(csv_file=os.path.join(DATA_DIR, "annotations", "test.csv"), root_dir=IMAGES_DIR, transform=transform)
 
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=4)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=8, persistent_workers=True)
+    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=8, persistent_workers=True)
 
     return train_loader, test_loader
 
 
 if __name__ == "__main__":
     logger = get_logger("cat_dog_classifier.log")
-
+    run_uuid = uuid.uuid4()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = CatDogClassifier().to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    adam = torch.optim.Adam(model.parameters(), lr=1e-4)
+    sgd = torch.optim.SGD(model.parameters(), lr=1e-3, momentum=0.9)
 
     train_loader, test_loader = load_dataset()
+    epchos = 100
+    logger.info(
+        f"[{run_uuid}]: Training on {len(train_loader)} samples and validating on {len(test_loader)} samples on {device} for {epchos} epochs"
+    )
 
-    epchos = 50
+    opt_condition = int(0.8 * epchos)
     for epoch in range(epchos):
-        epoch += 25
         train_loss = 0.0
         train_acc = 0.0
-
-        val_loss = 0.0
-        val_acc = 0.0
-
         model.train()
 
+        optimizer = adam if epoch < opt_condition else sgd
         for i, (inputs, labels) in (
-            t := tqdm(enumerate(train_loader), total=len(train_loader), desc="Training Epoch {}/{}".format(epoch + 1, epchos + 25))
+            t := tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epchos}")
         ):
             inputs, labels = inputs.to(device), labels.to(device)
 
@@ -74,12 +80,15 @@ if __name__ == "__main__":
             t.set_postfix(loss=train_loss / ((i + 1) * train_loader.batch_size), acc=train_acc / ((i + 1) * train_loader.batch_size))
 
         logger.info(
-            f"Training Loss (Epoch {epoch + 1})): {train_loss / len(train_loader)}, Training Accuracy: {train_acc / len(train_loader)}"
+            f"Training Loss (Epoch {epoch + 1}): {train_loss / len(train_loader)}, Training Accuracy: {train_acc / len(train_loader)}"
         )
 
+        val_loss = 0.0
+        val_acc = 0.0
         model.eval()
+
         for i, (inputs, labels) in (
-            t := tqdm(enumerate(test_loader), total=len(test_loader), desc="Validation Epoch {}/{}".format(epoch + 1, epchos + 25))
+            t := tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epchos}")
         ):
             inputs, labels = inputs.to(device), labels.to(device)
 
@@ -92,7 +101,8 @@ if __name__ == "__main__":
 
             t.set_postfix(loss=val_loss / ((i + 1) * test_loader.batch_size), acc=val_acc / ((i + 1) * test_loader.batch_size))
 
-        logger.info(f"Val Loss (Epoch {epoch + 1})): {train_loss / len(train_loader)}, Val Accuracy: {val_acc / len(train_loader)}")
+        logger.info(f"Val Loss (Epoch {epoch + 1}): {train_loss / len(test_loader)}, Val Accuracy: {val_acc / len(test_loader)}")
 
-        save_file_name = os.path.join(DATA_DIR, "models", f"cat_dog_classifier-{datetime.now().strftime('%Y%m%d%H%M%S')}-{epoch+1}.pth")
-        torch.save(model.state_dict(), save_file_name)
+        if (epoch + 1) % 10 == 0:
+            save_file_name = os.path.join(DATA_DIR, "models", f"cdc-{run_uuid}-{epoch+1}.pth")
+            torch.save(model.state_dict(), save_file_name)

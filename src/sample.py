@@ -8,7 +8,7 @@ from utils import DATA_DIR, read_image
 if __name__ == "__main__":
     label_map = {0: "cat", 1: "dog"}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    path = os.path.join(DATA_DIR, "models", "cat_dog_classifier-20231217155700-45.pth")
+    path = os.path.join(DATA_DIR, "models", "cdc-67d48ec2-42f5-42fa-b8da-cdb312b893e3-100.pth")
     model = CatDogClassifier().to(device)
     model.load_state_dict(torch.load(path))
     model.eval()
@@ -25,10 +25,11 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         output = model(img1)
-        print(output)
         output = torch.softmax(output, dim=1)
+        print(output)
         _, predicted = torch.max(output.data, 1)
         print(label_map[predicted.item()])
+
         output = model(img2)
         output = torch.softmax(output, dim=1)
         print(output)
