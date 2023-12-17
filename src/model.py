@@ -6,38 +6,29 @@ class CatDogClassifier(nn.Module):
     def __init__(self, num_classes=2):
         super(CatDogClassifier, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(3, 32, 3, 1, 1),
+            nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(32, 64, 3, 1, 1),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Conv2d(64, 192, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(64, 128, 3, 1, 1),
+            nn.MaxPool2d(kernel_size=2),
+            nn.Conv2d(192, 384, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
-            nn.Conv2d(128, 256, 3, 1, 1),
+            nn.Conv2d(384, 256, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.MaxPool2d(2, 2),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2),
         )
-        self.avgpool = nn.AdaptiveAvgPool2d((16, 16))
-        # Maybe reduce the number of neurons in the classifier
-        # self.classifier = nn.Sequential(
-        #    nn.Dropout(),
-        #    nn.Linear(256 * 16 * 16, 1024),
-        #    nn.ReLU(inplace=True),
-        #    nn.Dropout(),
-        #    nn.Linear(1024, 512),
-        #    nn.ReLU(inplace=True),
-        #    nn.Linear(512, num_classes),
-        #    nn.Softmax(dim=1),
-        # )
+        self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
         self.classifier = nn.Sequential(
             nn.Dropout(),
-            nn.Linear(256 * 16 * 16, 512),
+            nn.Linear(256 * 6 * 6, 1024),
             nn.ReLU(inplace=True),
             nn.Dropout(),
+            nn.Linear(1024, 512),
+            nn.ReLU(inplace=True),
             nn.Linear(512, num_classes),
-            #nn.Softmax(dim=1),
         )
 
     def forward(self, x):

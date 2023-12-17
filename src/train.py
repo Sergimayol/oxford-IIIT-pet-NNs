@@ -37,22 +37,28 @@ if __name__ == "__main__":
     logger = get_logger("cat_dog_classifier.log")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    path = os.path.join(DATA_DIR, "models", "cat_dog_classifier-20231217152013-25.pth")
     model = CatDogClassifier().to(device)
+    model.load_state_dict(torch.load(path))
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
     train_loader, test_loader = load_dataset()
 
-    epchos = 25
+    epchos = 50
     for epoch in range(epchos):
+        epoch += 25
         train_loss = 0.0
+        train_acc = 0.0
+
         val_loss = 0.0
+        val_acc = 0.0
 
         model.train()
 
         for i, (inputs, labels) in (
-            t := tqdm(enumerate(train_loader), total=len(train_loader), desc="Training Epoch {}/{}".format(epoch + 1, epchos))
+            t := tqdm(enumerate(train_loader), total=len(train_loader), desc="Training Epoch {}/{}".format(epoch + 1, epchos + 25))
         ):
             inputs, labels = inputs.to(device), labels.to(device)
 
@@ -64,14 +70,18 @@ if __name__ == "__main__":
             optimizer.step()
 
             train_loss += loss.item()
+            outputs = torch.softmax(outputs, dim=1)
+            train_acc += (outputs.argmax(1) == labels).sum().item()
 
-            t.set_postfix(loss=train_loss / ((i + 1) * train_loader.batch_size))
+            t.set_postfix(loss=train_loss / ((i + 1) * train_loader.batch_size), acc=train_acc / ((i + 1) * train_loader.batch_size))
 
-        logger.info(f"Training Loss (Epoch {epoch + 1})): {train_loss / len(train_loader)}")
+        logger.info(
+            f"Training Loss (Epoch {epoch + 1})): {train_loss / len(train_loader)}, Training Accuracy: {train_acc / len(train_loader)}"
+        )
 
         model.eval()
         for i, (inputs, labels) in (
-            t := tqdm(enumerate(test_loader), total=len(test_loader), desc="Validation Epoch {}/{}".format(epoch + 1, epchos))
+            t := tqdm(enumerate(test_loader), total=len(test_loader), desc="Validation Epoch {}/{}".format(epoch + 1, epchos + 25))
         ):
             inputs, labels = inputs.to(device), labels.to(device)
 
@@ -79,10 +89,12 @@ if __name__ == "__main__":
             loss = criterion(outputs, labels)
 
             val_loss += loss.item()
+            outputs = torch.softmax(outputs, dim=1)
+            val_acc += (outputs.argmax(1) == labels).sum().item()
 
-            t.set_postfix(loss=val_loss / ((i + 1) * test_loader.batch_size))
+            t.set_postfix(loss=val_loss / ((i + 1) * test_loader.batch_size), acc=val_acc / ((i + 1) * test_loader.batch_size))
 
-        logger.info(f"Val Loss (Epoch {epoch + 1})): {train_loss / len(train_loader)}")
+        logger.info(f"Val Loss (Epoch {epoch + 1})): {train_loss / len(train_loader)}, Val Accuracy: {val_acc / len(train_loader)}")
 
         save_file_name = os.path.join(DATA_DIR, "models", f"cat_dog_classifier-{datetime.now().strftime('%Y%m%d%H%M%S')}-{epoch+1}.pth")
         torch.save(model.state_dict(), save_file_name)
