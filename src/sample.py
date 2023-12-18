@@ -8,7 +8,7 @@ from utils import DATA_DIR, read_image
 if __name__ == "__main__":
     label_map = {0: "cat", 1: "dog"}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    path = os.path.join(DATA_DIR, "models", "cdc-67d48ec2-42f5-42fa-b8da-cdb312b893e3-100.pth")
+    path = os.path.join(DATA_DIR, "models", "cdc-e020950a-ad2a-4859-94a2-08a39fbe4892-100.pth")
     model = CatDogClassifier().to(device)
     model.load_state_dict(torch.load(path))
     model.eval()
