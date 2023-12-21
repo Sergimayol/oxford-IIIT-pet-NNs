@@ -8,8 +8,8 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 
 from data import CatDogDataset
-from model import CatDogClassifier
 from utils import DATA_DIR, IMAGES_DIR, get_logger
+from model import AnimalSegmentation2, CatDogClassifier, AnimalSegmentation
 
 
 # TODO: Change this to support all the datasets
@@ -38,7 +38,7 @@ def load_dataset() -> Tuple[DataLoader, DataLoader]:
     return train_loader, test_loader
 
 
-if __name__ == "__main__":
+def train_dogcat_classifier():
     logger = get_logger("cat_dog_classifier.log")
     run_uuid = uuid.uuid4()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -106,3 +106,15 @@ if __name__ == "__main__":
         if (epoch + 1) % 10 == 0:
             save_file_name = os.path.join(DATA_DIR, "models", f"cdc-{run_uuid}-{epoch+1}.pth")
             torch.save(model.state_dict(), save_file_name)
+
+
+if __name__ == "__main__":
+    logger = get_logger("animal_segmentation.log")
+    run_uuid = uuid.uuid4()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = AnimalSegmentation2().to(device)
+    print(model)
+    out = model(torch.randn(1, 3, 256, 256).to(device))
+    from torchinfo import summary
+
+    summary(model, input_size=(1, 3, 256, 256))
