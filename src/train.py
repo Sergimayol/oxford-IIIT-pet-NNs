@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 
 from data import CatDogDataset
 from utils import DATA_DIR, IMAGES_DIR, MODELS_DIR, get_logger
-from model import AnimalSegmentation2, CatDogClassifier, AnimalSegmentation, CatDogClassifier2
+from model import CatDogClassifier, AnimalSegmentation, CatDogClassifier2
 
 
 # TODO: Change this to support all the datasets
@@ -56,7 +56,7 @@ def train_dogcat_classifier():
     )
     wandb.init(
         project="cat-dog-classifier",
-        name=f"cat-dog-classifier-{run_uuid}",
+        name=run_uuid,
         config={
             "epochs": epchos,
             "batch_size": 64,
@@ -138,7 +138,7 @@ def train_animal_segmentation():
     logger = get_logger("animal_segmentation.log")
     run_uuid = uuid.uuid4()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = AnimalSegmentation2().to(device)
+    model = AnimalSegmentation().to(device)
     print(model)
     out = model(torch.randn(1, 3, 256, 256).to(device))
     from torchinfo import summary
