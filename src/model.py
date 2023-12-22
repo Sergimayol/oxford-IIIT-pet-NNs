@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
+import torch.nn.functional as F
 from typing import Tuple
 from torchvision.models.segmentation import fcn_resnet50, fcn
 
@@ -44,6 +45,47 @@ class CatDogClassifier(nn.Module):
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
         x = self.classifier(x)
+        return x
+
+
+class CatDogClassifier2(nn.Module):
+    def __init__(self, num_classes: int = 2):
+        super(CatDogClassifier2, self).__init__()
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=10, kernel_size=3, stride=1, padding=1)  # 256x256x3 -> 256x256x10
+        self.mp1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)  # 256x256x10 -> 128x128x10
+        self.conv2 = nn.Conv2d(in_channels=10, out_channels=20, kernel_size=3, stride=1, padding=1)  # 128x128x10 -> 128x128x20
+        self.mp2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)  # 128x128x20 -> 64x64x20
+        self.conv3 = nn.Conv2d(in_channels=20, out_channels=30, kernel_size=3, stride=1, padding=1)  # 64x64x20 -> 64x64x30
+        self.conv4 = nn.Conv2d(in_channels=30, out_channels=30, kernel_size=3, stride=1, padding=1)  # 64x64x30 -> 64x64x30
+        self.mp3 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)  # 64x64x30 -> 32x32x30
+        self.conv5 = nn.Conv2d(in_channels=30, out_channels=40, kernel_size=3, stride=1, padding=1)  # 32x32x30 -> 32x32x40
+        self.conv6 = nn.Conv2d(in_channels=40, out_channels=40, kernel_size=3, stride=1, padding=1)  # 32x32x40 -> 32x32x40
+        self.mp4 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)  # 32x32x40 -> 16x16x40
+        self.fc1 = nn.Linear(16 * 16 * 40, 1024)  # 16x16x40 -> 1024
+        self.dropout1 = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(1024, 512)  # 1024 -> 512
+        self.dropout2 = nn.Dropout(0.5)
+        self.fc3 = nn.Linear(512, 256)  # 512 -> 256
+        self.dropout3 = nn.Dropout(0.5)
+        self.fc4 = nn.Linear(256, num_classes)  # 256 -> num_classes
+
+    def forward(self, x):
+        x = self.mp1(F.relu(self.conv1(x)))
+        x = self.mp2(F.relu(self.conv2(x)))
+        x = F.relu(self.conv3(x))
+        x = F.relu(self.conv4(x))
+        x = self.mp3(x)
+        x = F.relu(self.conv5(x))
+        x = F.relu(self.conv6(x))
+        x = self.mp4(x)
+        x = x.view(-1, 16 * 16 * 40)
+        x = F.relu(self.fc1(x))
+        x = self.dropout1(x)
+        x = F.relu(self.fc2(x))
+        x = self.dropout2(x)
+        x = F.relu(self.fc3(x))
+        x = self.dropout3(x)
+        x = self.fc4(x)
         return x
 
 

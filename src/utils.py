@@ -5,6 +5,7 @@ from tqdm import tqdm
 from PIL import Image
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+MODELS_DIR = "D:\\models"
 IMAGES_DIR = os.path.join(DATA_DIR, "images")
 DATASET_URL = "https://thor.robots.ox.ac.uk/~vgg/data/pets/images.tar.gz"
 DATASET_GROUND_TRUTH_URL = "https://thor.robots.ox.ac.uk/~vgg/data/pets/annotations.tar.gz"
