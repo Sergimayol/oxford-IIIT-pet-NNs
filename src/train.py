@@ -4,20 +4,17 @@ import wandb
 import torch
 import torch.nn as nn
 from tqdm import tqdm
-from typing import Tuple
+from typing import Tuple, Literal
+from torch.utils.data import Dataset
 from torchvision import transforms
 from torch.utils.data import DataLoader
 
-from data import CatDogDataset
+from data import CatDogDataset, AnimalSegmentationDataset
 from utils import DATA_DIR, IMAGES_DIR, MODELS_DIR, get_logger
-from model import CatDogClassifier, AnimalSegmentation, CatDogClassifier2
+from model import CatDogClassifier, AnimalSegmentation, CatDogClassifier2, AnimalSegmentation2, DiceLoss
 
 
-# TODO: Change this to support all the datasets
-def load_dataset() -> Tuple[DataLoader, DataLoader]:
-    """
-    Load the dataset and apply transformations.
-    """
+def get_catdog_dataset() -> Tuple[Dataset, Dataset]:
     transform = transforms.Compose(
         [
             transforms.Resize((256, 256)),
@@ -31,8 +28,46 @@ def load_dataset() -> Tuple[DataLoader, DataLoader]:
     train_dataset = CatDogDataset(csv_file=os.path.join(DATA_DIR, "annotations", "train.csv"), root_dir=IMAGES_DIR, transform=transform)
     test_dataset = CatDogDataset(csv_file=os.path.join(DATA_DIR, "annotations", "test.csv"), root_dir=IMAGES_DIR, transform=transform)
 
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=8, persistent_workers=True)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=8, persistent_workers=True)
+    return train_dataset, test_dataset
+
+
+def get_animalseg_dataset() -> Tuple[Dataset, Dataset]:
+    transform = transforms.Compose(
+        [
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
+    transform2 = transforms.Compose([transforms.Resize((256, 256)), transforms.ToTensor()])
+
+    train_dataset = AnimalSegmentationDataset(
+        csv_file=os.path.join(DATA_DIR, "annotations", "train_seg.csv"),
+        root_dir=os.path.join(DATA_DIR, "images"),
+        trimap_dir=os.path.join(DATA_DIR, "annotations", "trimaps"),
+        transform=(transform, transform2),
+    )
+    test_dataset = AnimalSegmentationDataset(
+        csv_file=os.path.join(DATA_DIR, "annotations", "test_seg.csv"),
+        root_dir=os.path.join(DATA_DIR, "images"),
+        trimap_dir=os.path.join(DATA_DIR, "annotations", "trimaps"),
+        transform=(transform, transform2),
+    )
+
+    return train_dataset, test_dataset
+
+
+def load_dataset(
+    dataset: Literal["catdog", "animalseg"], workers: Tuple[int, int] = (8, 4), batch_size: Tuple[int, int] = (64, 64)
+) -> Tuple[DataLoader, DataLoader]:
+    """
+    Load the dataset and apply transformations.
+    """
+    dataset_map = {"catdog": get_catdog_dataset, "animalseg": get_animalseg_dataset}
+    train_dataset, test_dataset = dataset_map[dataset.lower()]()
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size[0], shuffle=True, num_workers=workers[0], persistent_workers=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size[1], shuffle=False, num_workers=workers[1], persistent_workers=True)
 
     return train_loader, test_loader
 
@@ -44,25 +79,27 @@ def train_dogcat_classifier():
     model = CatDogClassifier().to(device)
 
     criterion = nn.CrossEntropyLoss(reduction="sum")
-    lr_adam = 1e-3
-    lr_sgd = 1e-4
+    lr_adam = 1e-4
+    # lr_sgd = 1e-4
     adam = torch.optim.Adam(model.parameters(), lr=lr_adam)
-    sgd = torch.optim.SGD(model.parameters(), lr=lr_sgd, momentum=0.9)
+    # sgd = torch.optim.SGD(model.parameters(), lr=lr_sgd, momentum=0.9)
 
-    train_loader, test_loader = load_dataset()
+    train_loader, test_loader = load_dataset("catdog")
     epchos = 100
     logger.info(
         f"[{run_uuid}]: Training on {len(train_loader)} samples and validating on {len(test_loader)} samples on {device} for {epchos} epochs"
     )
     wandb.init(
         project="cat-dog-classifier",
-        name=run_uuid,
+        name=f"{run_uuid}",
         config={
             "epochs": epchos,
             "batch_size": 64,
             "device": device,
-            "optimizer": ["adam", "sgd"],
-            "lr": [lr_adam, lr_sgd],
+            # "optimizer": ["adam", "sgd"],
+            "optimizer": "adam",
+            # "lr": [lr_adam, lr_sgd],
+            "lr": lr_adam,
             "momentum": 0.9,
             "loss": "cross_entropy with reduction=sum",
             "dataset": "cat_dog_dataset",
@@ -71,13 +108,13 @@ def train_dogcat_classifier():
     )
     # wandb.watch(model)
     min_loss = 10000000
-    opt_condition = int(0.8 * epchos)
+    # opt_condition = int(0.8 * epchos)
     for epoch in range(epchos):
         train_loss = 0.0
         train_acc = 0.0
         model.train()
 
-        optimizer = adam if epoch < opt_condition else sgd
+        optimizer = adam  # if epoch < opt_condition else sgd
         for i, (inputs, labels) in (
             t := tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epchos}")
         ):
@@ -125,7 +162,7 @@ def train_dogcat_classifier():
 
         if tt_loss < min_loss:
             min_loss = tt_loss
-            torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"cat_dog_classifier_{run_uuid}-{epoch+1}.pth"))
+            torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"cat_dog_classifier_{run_uuid}.pth"))
 
         if epoch % 5 == 0:
             torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"cat_dog_classifier_{run_uuid}-{epoch+1}.pth"))
@@ -138,13 +175,84 @@ def train_animal_segmentation():
     logger = get_logger("animal_segmentation.log")
     run_uuid = uuid.uuid4()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = AnimalSegmentation().to(device)
-    print(model)
-    out = model(torch.randn(1, 3, 256, 256).to(device))
-    from torchinfo import summary
+    model = AnimalSegmentation2().to(device)
 
-    summary(model, input_size=(1, 3, 256, 256))
+    criterion = DiceLoss()
+    lr = 1e-4
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    train_loader, test_loader = load_dataset("animalseg")
+    epchos = 20
+    logger.info(
+        f"[{run_uuid}]: Training on {len(train_loader)} samples and validating on {len(test_loader)} samples on {device} for {epchos} epochs"
+    )
+    wandb.init(
+        project="animal-segmentation",
+        name=f"{run_uuid}",
+        config={
+            "epochs": epchos,
+            "batch_size": 64,
+            "device": device,
+            "optimizer": "adam",
+            "lr": lr,
+            "loss": "dice loss",
+            "dataset": "animal_segmentation_dataset",
+            "architecture": str(model),
+        },
+    )
+
+    min_loss = 10000000
+    for epoch in range(epchos):
+        train_loss = 0.0
+        model.train()
+
+        for i, (inputs, labels) in (
+            t := tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epchos}")
+        ):
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            optimizer.zero_grad()
+
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+
+            t.set_postfix(loss=train_loss / ((i + 1) * train_loader.batch_size))
+
+        val_loss = 0.0
+        model.eval()
+        with torch.no_grad():
+            for i, (inputs, labels) in (
+                t := tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epchos}")
+            ):
+                inputs, labels = inputs.to(device), labels.to(device)
+
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+
+                val_loss += loss.item()
+
+                t.set_postfix(loss=val_loss / ((i + 1) * test_loader.batch_size))
+
+        tt_loss = val_loss / len(test_loader.dataset)
+        t_loss = train_loss / len(train_loader.dataset)
+
+        wandb.log({"val_loss": tt_loss, "train_loss": t_loss})
+
+        if tt_loss < min_loss:
+            min_loss = tt_loss
+            torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"animal_segmentation_{run_uuid}.pth"))
+
+        if epoch % 5 == 0:
+            torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"animal_segmentation_{run_uuid}-{epoch+1}.pth"))
+
+    torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"animal_segmentation_{run_uuid}_final.pth"))
+    wandb.finish()
 
 
 if __name__ == "__main__":
-    train_dogcat_classifier()
+    # train_dogcat_classifier()
+    train_animal_segmentation()

@@ -62,11 +62,11 @@ def download_dataset(
                 tar.extract(member, path=data_dir)
 
 
-def read_image(path: str):
+def read_image(path: str, mode: str = "RGB"):
     """
     Read an image from the disk.
     """
-    return Image.open(path).convert("RGB")
+    return Image.open(path).convert(mode)
 
 
 def get_logger(file_name: str = "model.log"):
