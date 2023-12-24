@@ -13,6 +13,13 @@
 └── README.md
 ```
 
+## Tareas (TODOs)
+
+-   [x] Clasificación perro/gato
+-   [ ] Clasificación de razas
+-   [x] Detección de cabezas
+-   [x] Segmentación de animales
+
 ## Requisitos
 
 -   [Python](https://www.python.org/) 3.10 o superior
