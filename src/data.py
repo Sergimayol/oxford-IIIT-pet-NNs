@@ -1,10 +1,11 @@
 import os
+import argparse
 import pandas as pd
 from tqdm import tqdm
 from shutil import copy
 import xml.etree.ElementTree as ET
 from torch.utils.data import Dataset
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Dict
 from sklearn.model_selection import train_test_split
 
 from utils import download_dataset, DATA_DIR, read_image, write_to_file, create_dir, create_multiple_dirs
@@ -85,9 +86,7 @@ class AnimalSegmentationDataset(Dataset):
 
 
 def create_cat_vs_dog_dataset():
-    """
-    Create a dataset with two classes: cat and dog.
-    """
+    print("[INFO]: Creating cat vs dog dataset")
     path = os.path.join(DATA_DIR, "annotations", "list.txt")
     annotations = pd.read_csv(path, sep=" ", names=["filename", "class_id", "species", "breed_id"], skiprows=6)
     annotations.drop(columns=["breed_id", "class_id"], inplace=True)
@@ -96,9 +95,11 @@ def create_cat_vs_dog_dataset():
 
     train.to_csv(os.path.join(DATA_DIR, "annotations", "train.csv"), index=False)
     test.to_csv(os.path.join(DATA_DIR, "annotations", "test.csv"), index=False)
+    print(f"[INFO]: Cat vs dog dataset created in {os.path.join(DATA_DIR, 'annotations')}")
 
 
 def create_animal_segmentation_dataset():
+    print("[INFO]: Creating animal segmentation dataset")
     path = os.path.join(DATA_DIR, "annotations", "list.txt")
     annotations = pd.read_csv(path, sep=" ", names=["filename", "class_id", "species", "breed_id"], skiprows=6)
     annotations.drop(columns=["class_id", "breed_id"], inplace=True)
@@ -106,9 +107,11 @@ def create_animal_segmentation_dataset():
 
     train.to_csv(os.path.join(DATA_DIR, "annotations", "train_seg.csv"), index=False)
     test.to_csv(os.path.join(DATA_DIR, "annotations", "test_seg.csv"), index=False)
+    print(f"[INFO]: Animal segmentation dataset created in {os.path.join(DATA_DIR, 'annotations')}")
 
 
 def create_head_pos_dataset():
+    print("[INFO]: Creating head position dataset")
     path = os.path.join(DATA_DIR, "annotations", "xmls")
     annotations = []
 
@@ -159,9 +162,34 @@ def create_head_pos_dataset():
     train.apply(lambda x: write_to_file(os.path.join(final_path, "train", "labels", x["filename"]), x["content"], "w"), axis=1)
     test.apply(lambda x: write_to_file(os.path.join(final_path, "test", "labels", x["filename"]), x["content"], "w"), axis=1)
 
+    print(f"[INFO]: Head position dataset created in {os.path.join(DATA_DIR, 'head_pos')}")
+
+
+def __parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Download the dataset")
+    parser.add_argument(
+        "--dataset",
+        "-d",
+        type=str,
+        default="cat_vs_dog",
+        help="Dataset to create from the downloaded files",
+        choices=["cat_vs_dog", "animal_segmentation", "head_pos"],
+    )
+    parser.add_argument("--all", "-a", action="store_true", help="Create all the dataset from the downloaded files", default=False)
+    parser.add_argument("--force_download", "-f", action="store_true", help="Force download dataset", default=False)
+    return parser.parse_args()
+
 
 if __name__ == "__main__":
-    # download_dataset()
-    # create_cat_vs_dog_dataset()
-    # create_animal_segmentation_dataset()
-    create_head_pos_dataset()
+    args = __parse_args()
+    download_dataset(force=args.force_download)
+    dataset_map: Dict[str, Callable] = {
+        "cat_vs_dog": create_cat_vs_dog_dataset,
+        "animal_segmentation": create_animal_segmentation_dataset,
+        "head_pos": create_head_pos_dataset,
+    }
+    if args.all:
+        for dataset in dataset_map.values():
+            dataset()
+    else:
+        dataset_map[args.dataset.lower()]()

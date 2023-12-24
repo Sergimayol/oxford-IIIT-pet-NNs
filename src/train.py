@@ -2,17 +2,17 @@ import os
 import uuid
 import wandb
 import torch
+import argparse
 import torch.nn as nn
 from tqdm import tqdm
-from typing import Tuple, Literal
-from torch.utils.data import Dataset
 from torchvision import transforms
+from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-from wandb.integration.ultralytics import add_wandb_callback
+from typing import Tuple, Literal, Dict, Callable
 
 from data import CatDogDataset, AnimalSegmentationDataset
 from utils import DATA_DIR, IMAGES_DIR, MODELS_DIR, get_logger
-from model import CatDogClassifier, AnimalSegmentation, CatDogClassifier2, AnimalSegmentation2, DiceLoss, HeadDetection
+from model import CatDogClassifier, AnimalSegmentation, CatDogClassifier2, AnimalSegmentationPretained, DiceLoss, HeadDetection
 
 
 def get_catdog_dataset() -> Tuple[Dataset, Dataset]:
@@ -73,35 +73,36 @@ def load_dataset(
     return train_loader, test_loader
 
 
-def train_dogcat_classifier():
+def train_dogcat_classifier(
+    workers: Tuple[int, int] = (8, 4),
+    batch_size: Tuple[int, int] = (64, 64),
+    epochs: int = 100,
+    lr: float = 1e-4,
+    optimizer: Literal["adam", "sgd"] = "adam",
+    momentum: float = 0.9,
+    device: str = "auto",
+    verbose: bool = False,
+    **kwargs,
+):
     logger = get_logger("cat_dog_classifier2.log")
     run_uuid = uuid.uuid4()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
     model = CatDogClassifier().to(device)
 
     criterion = nn.CrossEntropyLoss(reduction="sum")
-    lr_adam = 1e-4
-    # lr_sgd = 1e-4
-    adam = torch.optim.Adam(model.parameters(), lr=lr_adam)
-    # sgd = torch.optim.SGD(model.parameters(), lr=lr_sgd, momentum=0.9)
+    opt = torch.optim.Adam(model.parameters(), lr=lr) if optimizer == "adam" else torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum)
 
-    train_loader, test_loader = load_dataset("catdog")
-    epchos = 100
-    logger.info(
-        f"[{run_uuid}]: Training on {len(train_loader)} samples and validating on {len(test_loader)} samples on {device} for {epchos} epochs"
-    )
+    train_loader, test_loader = load_dataset("catdog", workers=workers, batch_size=batch_size)
+    logger.info(f"[{run_uuid}]: Training on {len(train_loader)} samples and validating on {len(test_loader)} samples on {device} for {epochs} epochs")
     wandb.init(
         project="cat-dog-classifier",
         name=f"{run_uuid}",
         config={
-            "epochs": epchos,
-            "batch_size": 64,
+            "epochs": epochs,
+            "batch_size": batch_size,
             "device": device,
-            # "optimizer": ["adam", "sgd"],
-            "optimizer": "adam",
-            # "lr": [lr_adam, lr_sgd],
-            "lr": lr_adam,
-            "momentum": 0.9,
+            "optimizer": str(opt),
+            "lr": lr,
             "loss": "cross_entropy with reduction=sum",
             "dataset": "cat_dog_dataset",
             "architecture": str(model),
@@ -109,24 +110,22 @@ def train_dogcat_classifier():
     )
     wandb.watch(model, criterion, log_freq=10)
     min_loss = 10000000
-    # opt_condition = int(0.8 * epchos)
-    for epoch in range(epchos):
+    for epoch in range(epochs):
         train_loss = 0.0
         train_acc = 0.0
         model.train()
 
-        optimizer = adam  # if epoch < opt_condition else sgd
         for i, (inputs, labels) in (
-            t := tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epchos}")
+            t := tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epochs}", disable=not verbose)
         ):
             inputs, labels = inputs.to(device), labels.to(device)
 
-            optimizer.zero_grad()
+            opt.zero_grad()
 
             outputs = model(inputs)
             loss = criterion(outputs, labels)
             loss.backward()
-            optimizer.step()
+            opt.step()
 
             train_loss += loss.item()
             outputs = torch.softmax(outputs, dim=1)
@@ -140,7 +139,7 @@ def train_dogcat_classifier():
         model.eval()
         with torch.no_grad():
             for i, (inputs, labels) in (
-                t := tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epchos}")
+                t := tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epochs}", disable=not verbose)
             ):
                 inputs, labels = inputs.to(device), labels.to(device)
 
@@ -172,29 +171,35 @@ def train_dogcat_classifier():
     wandb.finish()
 
 
-def train_animal_segmentation():
+def train_animal_segmentation(
+    workers: Tuple[int, int] = (8, 4),
+    batch_size: Tuple[int, int] = (64, 64),
+    epochs: int = 100,
+    lr: float = 1e-4,
+    optimizer: Literal["adam", "sgd"] = "adam",
+    momentum: float = 0.9,
+    device: str = "auto",
+    verbose: bool = False,
+    **kwargs,
+):
     logger = get_logger("animal_segmentation.log")
     run_uuid = uuid.uuid4()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = AnimalSegmentation2().to(device)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
+    model = AnimalSegmentationPretained().to(device)
 
     criterion = DiceLoss()
-    lr = 1e-4
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    opt = torch.optim.Adam(model.parameters(), lr=lr) if optimizer == "adam" else torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum)
 
-    train_loader, test_loader = load_dataset("animalseg")
-    epchos = 20
-    logger.info(
-        f"[{run_uuid}]: Training on {len(train_loader)} samples and validating on {len(test_loader)} samples on {device} for {epchos} epochs"
-    )
+    train_loader, test_loader = load_dataset("animalseg", workers=workers, batch_size=batch_size)
+    logger.info(f"[{run_uuid}]: Training on {len(train_loader)} samples and validating on {len(test_loader)} samples on {device} for {epochs} epochs")
     wandb.init(
         project="animal-segmentation",
         name=f"{run_uuid}",
         config={
-            "epochs": epchos,
-            "batch_size": 64,
+            "epochs": epochs,
+            "batch_size": batch_size,
             "device": device,
-            "optimizer": "adam",
+            "optimizer": str(opt),
             "lr": lr,
             "loss": "dice loss",
             "dataset": "animal_segmentation_dataset",
@@ -204,21 +209,21 @@ def train_animal_segmentation():
 
     min_loss = 10000000
     wandb.watch(model, criterion, log_freq=10)
-    for epoch in range(epchos):
+    for epoch in range(epochs):
         train_loss = 0.0
         model.train()
 
         for i, (inputs, labels) in (
-            t := tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epchos}")
+            t := tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epochs}", disable=not verbose)
         ):
             inputs, labels = inputs.to(device), labels.to(device)
 
-            optimizer.zero_grad()
+            opt.zero_grad()
 
             outputs = model(inputs)
             loss = criterion(outputs, labels)
             loss.backward()
-            optimizer.step()
+            opt.step()
 
             train_loss += loss.item()
 
@@ -228,7 +233,7 @@ def train_animal_segmentation():
         model.eval()
         with torch.no_grad():
             for i, (inputs, labels) in (
-                t := tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epchos}")
+                t := tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epochs}", disable=not verbose)
             ):
                 inputs, labels = inputs.to(device), labels.to(device)
 
@@ -255,18 +260,36 @@ def train_animal_segmentation():
     wandb.finish()
 
 
-def train_head_detection():
+def train_head_detection(epochs: int = 50, device: str = "auto", verbose: bool = False, **kwargs):
     model = HeadDetection().backbone
-    uuid = uuid.uuid4()
-    wandb.init(project="head-detection", name=f"{uuid}", config={"architecture": str(model)})
-    add_wandb_callback(model, enable_model_checkpointing=True)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    results = model.train(data=os.path.join(DATA_DIR, "head_pos", "dataset.yaml"), epochs=50, verbose=True, device=device)
-    print(results)
+    run_uuid = uuid.uuid4()
+    wandb.init(project="head-detection", name=f"{run_uuid}", config={"architecture": str(model)})
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
+    results = model.train(data=os.path.join(DATA_DIR, "head_pos", "dataset.yaml"), epochs=epochs, verbose=verbose, device=device)
+    if verbose: print(results)
     wandb.finish()
 
 
+def __parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Train models")
+    parser.add_argument("--model", "-m", type=str, help="Model to train", choices=["catdog", "animalseg", "headpos"], required=True)
+    parser.add_argument("--workers", "-w", type=int, nargs=2, default=(8, 4), help="Number of workers for train and test, respectively")
+    parser.add_argument("--batch-size", "-b", type=int, nargs=2, default=(64, 64), help="Batch size for train and test, respectively")
+    parser.add_argument("--epochs", "-e", type=int, default=100, help="Number of epochs")
+    parser.add_argument("--lr", "-l", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--momentum", "-mo", type=float, default=0.9, help="Momentum")
+    parser.add_argument("--loss", "-lo", type=str, default="cross_entropy", help="Loss function")
+    parser.add_argument("--optimizer", "-o", type=str, default="adam", help="Optimizer", choices=["adam", "sgd"])
+    parser.add_argument("--device", "-d", type=str, default="auto", help="Device to train on")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose mode")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    # train_dogcat_classifier()
-    # train_animal_segmentation()
-    train_head_detection()
+    args = __parse_args()
+    model_train_map: Dict[str, Callable] = {
+        "catdog": train_dogcat_classifier,
+        "animalseg": train_animal_segmentation,
+        "headpos": train_head_detection,
+    }
+    model_train_map[args.model.lower()](**vars(args))
