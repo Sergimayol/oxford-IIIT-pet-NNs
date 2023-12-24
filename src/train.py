@@ -8,10 +8,11 @@ from typing import Tuple, Literal
 from torch.utils.data import Dataset
 from torchvision import transforms
 from torch.utils.data import DataLoader
+from wandb.integration.ultralytics import add_wandb_callback
 
 from data import CatDogDataset, AnimalSegmentationDataset
 from utils import DATA_DIR, IMAGES_DIR, MODELS_DIR, get_logger
-from model import CatDogClassifier, AnimalSegmentation, CatDogClassifier2, AnimalSegmentation2, DiceLoss
+from model import CatDogClassifier, AnimalSegmentation, CatDogClassifier2, AnimalSegmentation2, DiceLoss, HeadDetection
 
 
 def get_catdog_dataset() -> Tuple[Dataset, Dataset]:
@@ -106,7 +107,7 @@ def train_dogcat_classifier():
             "architecture": str(model),
         },
     )
-    # wandb.watch(model)
+    wandb.watch(model, criterion, log_freq=10)
     min_loss = 10000000
     # opt_condition = int(0.8 * epchos)
     for epoch in range(epchos):
@@ -202,6 +203,7 @@ def train_animal_segmentation():
     )
 
     min_loss = 10000000
+    wandb.watch(model, criterion, log_freq=10)
     for epoch in range(epchos):
         train_loss = 0.0
         model.train()
@@ -253,6 +255,18 @@ def train_animal_segmentation():
     wandb.finish()
 
 
+def train_head_detection():
+    model = HeadDetection().backbone
+    uuid = uuid.uuid4()
+    wandb.init(project="head-detection", name=f"{uuid}", config={"architecture": str(model)})
+    add_wandb_callback(model, enable_model_checkpointing=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    results = model.train(data=os.path.join(DATA_DIR, "head_pos", "dataset.yaml"), epochs=50, verbose=True, device=device)
+    print(results)
+    wandb.finish()
+
+
 if __name__ == "__main__":
     # train_dogcat_classifier()
-    train_animal_segmentation()
+    # train_animal_segmentation()
+    train_head_detection()

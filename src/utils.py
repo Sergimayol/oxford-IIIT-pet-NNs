@@ -3,6 +3,8 @@ import tarfile
 import urllib.request
 from tqdm import tqdm
 from PIL import Image
+from typing import Callable
+
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 MODELS_DIR = "D:\\models"
@@ -11,7 +13,7 @@ DATASET_URL = "https://thor.robots.ox.ac.uk/~vgg/data/pets/images.tar.gz"
 DATASET_GROUND_TRUTH_URL = "https://thor.robots.ox.ac.uk/~vgg/data/pets/annotations.tar.gz"
 
 
-def _tqdm_hook(t: tqdm):
+def _tqdm_hook(t: tqdm) -> Callable[[int, int, int], None]:
     last_b = [0]
 
     def inner(b=1, bsize=1, tsize=None):
@@ -34,9 +36,7 @@ def _tqdm_hook(t: tqdm):
 def download_dataset(
     url: str = DATASET_URL, ground_truth_url: str = DATASET_GROUND_TRUTH_URL, data_dir: str = DATA_DIR, force: bool = False
 ):
-    """
-    Download data from the web and save it to the data directory.
-    """
+    """Download data from the web and save it to the data directory."""
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
@@ -62,17 +62,13 @@ def download_dataset(
                 tar.extract(member, path=data_dir)
 
 
-def read_image(path: str, mode: str = "RGB"):
-    """
-    Read an image from the disk.
-    """
+def read_image(path: str, mode: str = "RGB") -> Image:
+    """Read an image from the disk."""
     return Image.open(path).convert(mode)
 
 
 def get_logger(file_name: str = "model.log"):
-    """
-    Create a logger.
-    """
+    """Create a logger."""
     import logging
 
     logging.basicConfig(
@@ -82,5 +78,22 @@ def get_logger(file_name: str = "model.log"):
         filename="./logs/" + file_name,
         filemode="a",
     )
-    logger = logging.getLogger(__name__)
-    return logger
+    return logging.getLogger(__name__)
+
+
+def write_to_file(file_name: str, data: str, mode: str = "a"):
+    """Write data to a file."""
+    with open(file_name, mode) as f:
+        f.write(data)
+
+
+def create_dir(dir_name: str):
+    """Create a directory."""
+    if not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+
+
+def create_multiple_dirs(dir_names: list):
+    """Create multiple directories."""
+    for dir_name in dir_names:
+        create_dir(dir_name)

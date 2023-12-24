@@ -3,8 +3,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
-from typing import Tuple
-from torchvision.models.segmentation import fcn_resnet50, fcn
+from ultralytics import YOLO
 
 
 class CatDogClassifier(nn.Module):
@@ -130,7 +129,12 @@ class RaceClassifier(nn.Module):
 
 
 class HeadDetection(nn.Module):
-    pass
+    def __init__(self):
+        super(HeadDetection, self).__init__()
+        self.backbone = YOLO("yolov8n.pt")
+
+    def forward(self, x) -> Tensor:
+        return self.backbone(x)
 
 
 class AnimalSegmentation(nn.Module):

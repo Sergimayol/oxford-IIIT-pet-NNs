@@ -1,10 +1,13 @@
 import os
 import pandas as pd
+from tqdm import tqdm
+from shutil import copy
+import xml.etree.ElementTree as ET
 from torch.utils.data import Dataset
 from typing import Callable, Optional, Tuple
 from sklearn.model_selection import train_test_split
 
-from utils import download_dataset, DATA_DIR, read_image
+from utils import download_dataset, DATA_DIR, read_image, write_to_file, create_dir, create_multiple_dirs
 
 
 class CatDogDataset(Dataset):
@@ -99,14 +102,66 @@ def create_animal_segmentation_dataset():
     path = os.path.join(DATA_DIR, "annotations", "list.txt")
     annotations = pd.read_csv(path, sep=" ", names=["filename", "class_id", "species", "breed_id"], skiprows=6)
     annotations.drop(columns=["class_id", "breed_id"], inplace=True)
-    print(annotations.head())
     train, test = train_test_split(annotations, test_size=0.2, random_state=42, stratify=annotations["species"])
 
     train.to_csv(os.path.join(DATA_DIR, "annotations", "train_seg.csv"), index=False)
     test.to_csv(os.path.join(DATA_DIR, "annotations", "test_seg.csv"), index=False)
 
 
+def create_head_pos_dataset():
+    path = os.path.join(DATA_DIR, "annotations", "xmls")
+    annotations = []
+
+    final_path = os.path.join(DATA_DIR, "head_pos")
+    create_dir(final_path)
+
+    dataset_yaml_path = os.path.join(DATA_DIR, "head_pos", "dataset.yaml")
+    write_to_file(dataset_yaml_path, "train: ./train\nval: ./test\nnames:\n 0: head", mode="w")
+
+    for file in tqdm(os.listdir(path)):
+        if file.endswith(".xml"):
+            tree = ET.parse(os.path.join(path, file))
+            root = tree.getroot()
+            filename = root.find("filename").text
+            bbox = root.find("object").find("bndbox")
+            xmin = float(bbox.find("xmin").text)
+            ymin = float(bbox.find("ymin").text)
+            xmax = float(bbox.find("xmax").text)
+            ymax = float(bbox.find("ymax").text)
+            width = float(root.find("size").find("width").text)
+            height = float(root.find("size").find("height").text)
+
+            x_center = (xmin + xmax) / 2 / width
+            y_center = (ymin + ymax) / 2 / height
+            width = (xmax - xmin) / width
+            height = (ymax - ymin) / height
+            filename = filename.split(".")[0]
+            content = f"0 {x_center} {y_center} {width} {height}"
+            annotations.append([content, 0, filename + ".txt"])
+
+    annotations = pd.DataFrame(annotations, columns=["content", "label", "filename"])
+    train, test = train_test_split(annotations, test_size=0.2, random_state=42, stratify=annotations["label"])
+
+    create_multiple_dirs(
+        [
+            os.path.join(final_path, "train", "labels"),
+            os.path.join(final_path, "train", "images"),
+            os.path.join(final_path, "test", "labels"),
+            os.path.join(final_path, "test", "images"),
+        ]
+    )
+
+    img_path = lambda x: os.path.join(DATA_DIR, "images", x["filename"].split(".")[0] + ".jpg")
+
+    train.apply(lambda x: copy(img_path(x), os.path.join(final_path, "train", "images")), axis=1)
+    test.apply(lambda x: copy(img_path(x), os.path.join(final_path, "test", "images")), axis=1)
+
+    train.apply(lambda x: write_to_file(os.path.join(final_path, "train", "labels", x["filename"]), x["content"], "w"), axis=1)
+    test.apply(lambda x: write_to_file(os.path.join(final_path, "test", "labels", x["filename"]), x["content"], "w"), axis=1)
+
+
 if __name__ == "__main__":
     # download_dataset()
     # create_cat_vs_dog_dataset()
-    create_animal_segmentation_dataset()
+    # create_animal_segmentation_dataset()
+    create_head_pos_dataset()
