@@ -3,8 +3,8 @@ import torch
 from torchvision import transforms
 import matplotlib.pyplot as plt
 
-from model import CatDogClassifier
-from utils import DATA_DIR, read_image
+from model import CatDogClassifier, AnimalSegmentationPretained
+from utils import DATA_DIR, read_image, MODELS_DIR
 
 if __name__ == "__main__":
     """
@@ -67,7 +67,6 @@ if __name__ == "__main__":
         print(predicted.shape)
         plt.imshow(predicted.cpu().numpy().squeeze())
         plt.show()
-    """
     from ultralytics import YOLO
 
     model = YOLO("./runs/detect/train5/weights/best.pt")
@@ -97,9 +96,37 @@ if __name__ == "__main__":
             (0, 255, 0),
             2,
         )
-
-
     image = cv2.resize(image, (800, 600))
     cv2.imshow("Image", image)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+    """
+    "animal_segmentation_f30b3c2e-dfb8-4355-a9b7-36836a4636ac-16"
+    model = AnimalSegmentationPretained()
+    model.to("cuda")
+    path = os.path.join(MODELS_DIR, "animal_segmentation_f30b3c2e-dfb8-4355-a9b7-36836a4636ac-16.pth")
+    model.load_state_dict(torch.load(path))
+    model.eval()
+    img1 = read_image(os.path.join(DATA_DIR, "tests", "c.jpg"))
+    img2 = read_image(os.path.join(DATA_DIR, "tests", "d.jpg"))
+    img3 = read_image(os.path.join(DATA_DIR, "tests", "a.jpg"))
+    transform = transforms.Compose(
+        [
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+        ]
+    )
+    img1 = transform(img1).unsqueeze(0).to("cuda")
+    img2 = transform(img2).unsqueeze(0).to("cuda")
+    img3 = transform(img3).unsqueeze(0).to("cuda")
+
+    with torch.no_grad():
+        output = model(img1)
+        plt.imshow(output.cpu().numpy().squeeze())
+        plt.show()
+        output = model(img2)
+        plt.imshow(output.cpu().numpy().squeeze())
+        plt.show()
+        output = model(img3)
+        plt.imshow(output.cpu().numpy().squeeze())
+        plt.show()

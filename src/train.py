@@ -278,7 +278,6 @@ def __parse_args() -> argparse.Namespace:
     parser.add_argument("--epochs", "-e", type=int, default=100, help="Number of epochs")
     parser.add_argument("--lr", "-l", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--momentum", "-mo", type=float, default=0.9, help="Momentum")
-    parser.add_argument("--loss", "-lo", type=str, default="cross_entropy", help="Loss function")
     parser.add_argument("--optimizer", "-o", type=str, default="adam", help="Optimizer", choices=["adam", "sgd"])
     parser.add_argument("--device", "-d", type=str, default="auto", help="Device to train on")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose mode")
