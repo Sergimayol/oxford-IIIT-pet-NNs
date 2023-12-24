@@ -158,4 +158,7 @@ data/annotations/**
 data/images/**
 data/models/**
 data/tests/**
+data/head_pos/**
 wandb/**
+*.pt
+runs/**
