@@ -102,10 +102,11 @@ if __name__ == "__main__":
     cv2.destroyAllWindows()
     """
     "animal_segmentation_f30b3c2e-dfb8-4355-a9b7-36836a4636ac-16"
-    model = AnimalSegmentationPretained()
+    #model = AnimalSegmentationPretained()
+    model = torch.hub.load("pytorch/vision:v0.10.0", "fcn_resnet50", pretrained=True)
     model.to("cuda")
-    path = os.path.join(MODELS_DIR, "animal_segmentation_f30b3c2e-dfb8-4355-a9b7-36836a4636ac-16.pth")
-    model.load_state_dict(torch.load(path))
+    #path = os.path.join(MODELS_DIR, "animal_segmentation_f30b3c2e-dfb8-4355-a9b7-36836a4636ac-16.pth")
+    #model.load_state_dict(torch.load(path))
     model.eval()
     img1 = read_image(os.path.join(DATA_DIR, "tests", "c.jpg"))
     img2 = read_image(os.path.join(DATA_DIR, "tests", "d.jpg"))
@@ -121,12 +122,15 @@ if __name__ == "__main__":
     img3 = transform(img3).unsqueeze(0).to("cuda")
 
     with torch.no_grad():
-        output = model(img1)
+        output = model(img1)["out"][0]
+        output = output.argmax(0)
         plt.imshow(output.cpu().numpy().squeeze())
         plt.show()
-        output = model(img2)
+        output = model(img2)["out"][0]
+        output = output.argmax(0)
         plt.imshow(output.cpu().numpy().squeeze())
         plt.show()
-        output = model(img3)
+        output = model(img3)["out"][0]
+        output = output.argmax(0)
         plt.imshow(output.cpu().numpy().squeeze())
         plt.show()

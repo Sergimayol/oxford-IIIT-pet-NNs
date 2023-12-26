@@ -197,9 +197,7 @@ class AnimalSegmentationPretained(nn.Module):
 
     def __init__(self):
         super(AnimalSegmentationPretained, self).__init__()
-        self.backbone = torch.hub.load(
-            "mateuszbuda/brain-segmentation-pytorch", "unet", in_channels=3, out_channels=1, init_features=32, pretrained=True
-        )
+        self.backbone = torch.hub.load("mateuszbuda/brain-segmentation-pytorch", "unet", in_channels=3, out_channels=1, init_features=32, pretrained=True)
 
     def forward(self, x) -> Tensor:
         return self.backbone(x)
