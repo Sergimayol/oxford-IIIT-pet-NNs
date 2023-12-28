@@ -1,6 +1,7 @@
 import os
 import argparse
 import pandas as pd
+import torch
 from tqdm import tqdm
 from shutil import copy
 import xml.etree.ElementTree as ET
@@ -12,9 +13,7 @@ from utils import download_dataset, DATA_DIR, read_image, write_to_file, create_
 
 
 class CatDogDataset(Dataset):
-    """
-    Cat and dog dataset.
-    """
+    """Cat and dog dataset."""
 
     def __init__(self, csv_file: str, root_dir: str, transform: Optional[Callable] = None):
         """
@@ -42,13 +41,12 @@ class CatDogDataset(Dataset):
         label = self.annotations.iloc[idx, 1]
         if self.transform:
             image = self.transform(image)
-        return image, (label - 1)  # -1 because the labels start from 1 instead of 0
+
+        return image, label
 
 
 class AnimalSegmentationDataset(Dataset):
-    """
-    Animal segmentation dataset.
-    """
+    """Animal segmentation dataset."""
 
     def __init__(self, csv_file: str, root_dir: str, trimap_dir: str, transform: Tuple[Optional[Callable], Optional[Callable]] = None):
         """
@@ -80,9 +78,38 @@ class AnimalSegmentationDataset(Dataset):
         if self.transform:
             assert len(self.transform) == 2, "The transform must be a tuple of two elements"
             image = self.transform[0](image)
-            label = self.transform[1](label)
+            label = self.transform[1](label)  # .to(torch.int64)
+            # label *= 255
+        return image, label  # .squeeze()
 
-        return image, label
+
+class RaceDataset(Dataset):
+    """Cat dog race dataset."""
+
+    def __init__(self, csv_file: str, root_dir: str, transform: Optional[Callable] = None):
+        """
+        Args:
+            csv_file (string): Path to the csv file with annotations.
+            root_dir (string): Directory with all the images.
+            transform (callable, optional): Optional transform to be applied on a sample.
+        """
+        self.annotations = pd.read_csv(csv_file)
+        self.root_dir = root_dir
+        self.transform = transform
+
+    def __len__(self):
+        """Return the length of the dataset."""
+        return len(self.annotations)
+
+    def __getitem__(self, idx):
+        """Get a sample from the dataset."""
+        img_path = os.path.join(self.root_dir, self.annotations.iloc[idx, 0])
+        image = read_image(img_path + ".jpg")
+        label = self.annotations.iloc[idx, 1]
+        if self.transform:
+            image = self.transform(image)
+        # label: (0, 36)
+        return image, label - 1  # -1 because the class_id starts at 1
 
 
 def create_cat_vs_dog_dataset():
@@ -92,6 +119,9 @@ def create_cat_vs_dog_dataset():
     annotations.drop(columns=["breed_id", "class_id"], inplace=True)
 
     train, test = train_test_split(annotations, test_size=0.2, random_state=42, stratify=annotations["species"])
+
+    train["species"] = train["species"].apply(lambda x: 0 if x == 1 else 1)
+    test["species"] = test["species"].apply(lambda x: 0 if x == 1 else 1)
 
     train.to_csv(os.path.join(DATA_DIR, "annotations", "train.csv"), index=False)
     test.to_csv(os.path.join(DATA_DIR, "annotations", "test.csv"), index=False)
@@ -165,15 +195,35 @@ def create_head_pos_dataset():
     print(f"[INFO]: Head position dataset created in {os.path.join(DATA_DIR, 'head_pos')}")
 
 
+def create_race_dataset():
+    # class_id 1-37 -> class_*.jpg
+    print("[INFO]: Creating cat dog race dataset")
+    path = os.path.join(DATA_DIR, "annotations", "list.txt")
+    annotations = pd.read_csv(path, sep=" ", names=["filename", "class_id", "species", "breed_id"], skiprows=6)
+    annotations.drop(columns=["species", "breed_id"], inplace=True)
+
+    train, test = train_test_split(annotations, test_size=0.2, random_state=42, stratify=annotations["class_id"])
+
+    # breed_name = filename without_extension and numbers
+    get_non_numbers = lambda x: "".join([c for c in x if not c.isdigit()])
+    breed_name = lambda x: get_non_numbers(x["filename"].split(".")[0])[:-1]
+    train["breed_name"] = train.apply(breed_name, axis=1)
+    test["breed_name"] = test.apply(breed_name, axis=1)
+
+    train.to_csv(os.path.join(DATA_DIR, "annotations", "train_race.csv"), index=False)
+    test.to_csv(os.path.join(DATA_DIR, "annotations", "test_race.csv"), index=False)
+    print(f"[INFO]: Cat dog race dataset created in {os.path.join(DATA_DIR, 'annotations')}")
+
+
 def __parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download the dataset")
     parser.add_argument(
         "--dataset",
         "-d",
         type=str,
-        default="cat_vs_dog",
+        default="catdog",
         help="Dataset to create from the downloaded files",
-        choices=["cat_vs_dog", "animal_segmentation", "head_pos"],
+        choices=["catdog", "animal_segmentation", "head_pos", "race"],
     )
     parser.add_argument("--all", "-a", action="store_true", help="Create all the dataset from the downloaded files", default=False)
     parser.add_argument("--force_download", "-f", action="store_true", help="Force download dataset", default=False)
@@ -184,9 +234,10 @@ if __name__ == "__main__":
     args = __parse_args()
     download_dataset(force=args.force_download)
     dataset_map: Dict[str, Callable] = {
-        "cat_vs_dog": create_cat_vs_dog_dataset,
+        "catdog": create_cat_vs_dog_dataset,
         "animal_segmentation": create_animal_segmentation_dataset,
         "head_pos": create_head_pos_dataset,
+        "race": create_race_dataset,
     }
     if args.all:
         for dataset in dataset_map.values():

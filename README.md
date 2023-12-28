@@ -16,9 +16,9 @@
 ## Tareas (TODOs)
 
 -   [x] Clasificación perro/gato
--   [ ] Clasificación de razas
+-   [x] Clasificación de razas
 -   [x] Detección de cabezas
--   [x] Segmentación de animales
+-   [ ] Segmentación de animales
 
 ## Requisitos
 

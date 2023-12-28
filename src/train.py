@@ -10,9 +10,18 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from typing import Tuple, Literal, Dict, Callable
 
-from data import CatDogDataset, AnimalSegmentationDataset
+from data import CatDogDataset, AnimalSegmentationDataset, RaceDataset
 from utils import DATA_DIR, IMAGES_DIR, MODELS_DIR, get_logger
-from model import CatDogClassifier, AnimalSegmentation, CatDogClassifier2, AnimalSegmentationPretained, DiceLoss, HeadDetection
+from model import (
+    AnimalSegmentationPretained2,
+    CatDogClassifier,
+    AnimalSegmentation,
+    CatDogClassifierV2,
+    AnimalSegmentationPretained,
+    DiceLoss,
+    HeadDetection,
+    RaceClassifier,
+)
 
 
 def get_catdog_dataset() -> Tuple[Dataset, Dataset]:
@@ -26,8 +35,11 @@ def get_catdog_dataset() -> Tuple[Dataset, Dataset]:
             transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3)),
         ]
     )
+    transform2 = transforms.Compose(
+        [transforms.Resize((256, 256)), transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])]
+    )  # Run: 95071d40-0781-4e61-9509-b5ace306818d
     train_dataset = CatDogDataset(csv_file=os.path.join(DATA_DIR, "annotations", "train.csv"), root_dir=IMAGES_DIR, transform=transform)
-    test_dataset = CatDogDataset(csv_file=os.path.join(DATA_DIR, "annotations", "test.csv"), root_dir=IMAGES_DIR, transform=transform)
+    test_dataset = CatDogDataset(csv_file=os.path.join(DATA_DIR, "annotations", "test.csv"), root_dir=IMAGES_DIR, transform=transform2)
 
     return train_dataset, test_dataset
 
@@ -37,7 +49,7 @@ def get_animalseg_dataset() -> Tuple[Dataset, Dataset]:
         [
             transforms.Resize((256, 256)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
     )
     transform2 = transforms.Compose([transforms.Resize((256, 256)), transforms.ToTensor()])
@@ -58,13 +70,33 @@ def get_animalseg_dataset() -> Tuple[Dataset, Dataset]:
     return train_dataset, test_dataset
 
 
+def get_race_dataset() -> Tuple[Dataset, Dataset]:
+    transform = transforms.Compose(
+        [
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomPerspective(distortion_scale=0.5, p=0.5),
+            transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3)),
+        ]
+    )
+    transform2 = transforms.Compose(
+        [transforms.Resize((256, 256)), transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])]
+    )
+    train_dataset = RaceDataset(csv_file=os.path.join(DATA_DIR, "annotations", "train_race.csv"), root_dir=IMAGES_DIR, transform=transform)
+    test_dataset = RaceDataset(csv_file=os.path.join(DATA_DIR, "annotations", "test_race.csv"), root_dir=IMAGES_DIR, transform=transform2)
+
+    return train_dataset, test_dataset
+
+
 def load_dataset(
-    dataset: Literal["catdog", "animalseg"], workers: Tuple[int, int] = (8, 4), batch_size: Tuple[int, int] = (64, 64)
+    dataset: Literal["catdog", "animalseg", "race"], workers: Tuple[int, int] = (8, 4), batch_size: Tuple[int, int] = (64, 64)
 ) -> Tuple[DataLoader, DataLoader]:
     """
     Load the dataset and apply transformations.
     """
-    dataset_map = {"catdog": get_catdog_dataset, "animalseg": get_animalseg_dataset}
+    dataset_map = {"catdog": get_catdog_dataset, "animalseg": get_animalseg_dataset, "race": get_race_dataset}
     train_dataset, test_dataset = dataset_map[dataset.lower()]()
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size[0], shuffle=True, num_workers=workers[0], persistent_workers=True)
@@ -82,12 +114,14 @@ def train_dogcat_classifier(
     momentum: float = 0.9,
     device: str = "auto",
     verbose: bool = False,
+    model_version: Literal["v1", "v2"] = "v1",
     **kwargs,
 ):
     logger = get_logger("cat_dog_classifier2.log")
     run_uuid = uuid.uuid4()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
-    model = CatDogClassifier().to(device)
+    model = CatDogClassifier() if model_version == "v1" else CatDogClassifierV2()
+    model = model.to(device)
 
     criterion = nn.CrossEntropyLoss(reduction="sum")
     opt = torch.optim.Adam(model.parameters(), lr=lr) if optimizer == "adam" else torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum)
@@ -108,16 +142,19 @@ def train_dogcat_classifier(
             "architecture": str(model),
         },
     )
-    wandb.watch(model, criterion, log_freq=10)
+    if verbose:
+        from torchinfo import summary
+
+        print(model)
+        print(summary(model, input_size=(1, 3, 256, 256)))
     min_loss = 10000000
     for epoch in range(epochs):
         train_loss = 0.0
         train_acc = 0.0
         model.train()
 
-        for i, (inputs, labels) in (
-            t := tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epochs}", disable=not verbose)
-        ):
+        t = tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epochs}", disable=not verbose)
+        for i, (inputs, labels) in t:
             inputs, labels = inputs.to(device), labels.to(device)
 
             opt.zero_grad()
@@ -134,13 +171,11 @@ def train_dogcat_classifier(
 
             t.set_postfix(loss=train_loss / ((i + 1) * train_loader.batch_size), acc=train_acc / ((i + 1) * train_loader.batch_size))
 
-        val_loss = 0.0
-        val_acc = 0.0
+        val_loss, val_acc = 0.0, 0.0
         model.eval()
         with torch.no_grad():
-            for i, (inputs, labels) in (
-                t := tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epochs}", disable=not verbose)
-            ):
+            t = tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epochs}", disable=not verbose)
+            for i, (inputs, labels) in t:
                 inputs, labels = inputs.to(device), labels.to(device)
 
                 outputs = model(inputs)
@@ -164,9 +199,6 @@ def train_dogcat_classifier(
             min_loss = tt_loss
             torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"cat_dog_classifier_{run_uuid}.pth"))
 
-        if epoch % 5 == 0:
-            torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"cat_dog_classifier_{run_uuid}-{epoch+1}.pth"))
-
     torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"cat_dog_classifier_{run_uuid}_final.pth"))
     wandb.finish()
 
@@ -185,9 +217,17 @@ def train_animal_segmentation(
     logger = get_logger("animal_segmentation.log")
     run_uuid = uuid.uuid4()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
-    model = AnimalSegmentationPretained().to(device)
+    model = AnimalSegmentation().to(device)
+    model(torch.randn(1, 3, 256, 256).to(device))
+    if verbose:
+        from torchinfo import summary
+
+        print(model)
+        print(summary(model, input_size=(1, 3, 256, 256), device=device))
+    # exit()
 
     criterion = DiceLoss()
+    # criterion = nn.CrossEntropyLoss(reduction="sum")
     opt = torch.optim.Adam(model.parameters(), lr=lr) if optimizer == "adam" else torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum)
 
     train_loader, test_loader = load_dataset("animalseg", workers=workers, batch_size=batch_size)
@@ -207,8 +247,8 @@ def train_animal_segmentation(
         },
     )
 
+    # wandb.watch(model, criterion, log_freq=10)
     min_loss = 10000000
-    wandb.watch(model, criterion, log_freq=10)
     for epoch in range(epochs):
         train_loss = 0.0
         model.train()
@@ -266,13 +306,113 @@ def train_head_detection(epochs: int = 50, device: str = "auto", verbose: bool =
     wandb.init(project="head-detection", name=f"{run_uuid}", config={"architecture": str(model)})
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
     results = model.train(data=os.path.join(DATA_DIR, "head_pos", "dataset.yaml"), epochs=epochs, verbose=verbose, device=device)
-    if verbose: print(results)
+    if verbose:
+        print(results)
+    wandb.finish()
+
+
+def train_race_classifier(
+    workers: Tuple[int, int] = (8, 4),
+    batch_size: Tuple[int, int] = (64, 64),
+    epochs: int = 100,
+    lr: float = 1e-4,
+    optimizer: Literal["adam", "sgd"] = "adam",
+    momentum: float = 0.9,
+    device: str = "auto",
+    verbose: bool = False,
+    **kwargs,
+):
+    logger = get_logger("race_classifier.log")
+    run_uuid = uuid.uuid4()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
+    model = RaceClassifier().to(device)
+
+    criterion = nn.CrossEntropyLoss(reduction="sum")
+    opt = torch.optim.Adam(model.parameters(), lr=lr) if optimizer == "adam" else torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+
+    train_loader, test_loader = load_dataset("race", workers=workers, batch_size=batch_size)
+    logger.info(f"[{run_uuid}]: Training on {len(train_loader)} samples and validating on {len(test_loader)} samples on {device} for {epochs} epochs")
+    wandb.init(
+        project="race-classifier",
+        name=f"{run_uuid}",
+        config={
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "device": device,
+            "optimizer": str(opt),
+            "lr": lr,
+            "loss": "cross_entropy with reduction=sum",
+            "dataset": "race dataset",
+            "architecture": str(model),
+        },
+    )
+
+    if verbose:
+        from torchinfo import summary
+
+        print(model)
+        print(summary(model, input_size=(1, 3, 256, 256)))
+    # exit()
+
+    min_loss = 10000000
+    for epoch in range(epochs):
+        train_loss = 0.0
+        train_acc = 0.0
+        model.train()
+
+        t = tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epochs}", disable=not verbose)
+        for i, (inputs, labels) in t:
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            opt.zero_grad()
+
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            opt.step()
+
+            train_loss += loss.item()
+            outputs = torch.softmax(outputs, dim=1)
+            pred = outputs.argmax(dim=1, keepdim=True)
+            train_acc += pred.eq(labels.view_as(pred)).sum().item()
+
+            t.set_postfix(loss=train_loss / ((i + 1) * train_loader.batch_size), acc=train_acc / ((i + 1) * train_loader.batch_size))
+
+        val_loss, val_acc = 0.0, 0.0
+        model.eval()
+        with torch.no_grad():
+            t = tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epochs}", disable=not verbose)
+            for i, (inputs, labels) in t:
+                inputs, labels = inputs.to(device), labels.to(device)
+
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+
+                val_loss += loss.item()
+                outputs = torch.softmax(outputs, dim=1)
+                pred = outputs.argmax(dim=1, keepdim=True)
+                val_acc += pred.eq(labels.view_as(pred)).sum().item()
+
+                t.set_postfix(loss=val_loss / ((i + 1) * test_loader.batch_size), acc=val_acc / ((i + 1) * test_loader.batch_size))
+
+        tt_loss = val_loss / len(test_loader.dataset)
+        tt_acc = val_acc / len(test_loader.dataset)
+        t_loss = train_loss / len(train_loader.dataset)
+        t_acc = train_acc / len(train_loader.dataset)
+
+        wandb.log({"val_loss": tt_loss, "val_acc": tt_acc, "train_loss": t_loss, "train_acc": t_acc})
+
+        if tt_loss < min_loss:
+            min_loss = tt_loss
+            torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"race_classifier_{run_uuid}.pth"))
+
+    torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"race_classifier_{run_uuid}_final.pth"))
     wandb.finish()
 
 
 def __parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train models")
-    parser.add_argument("--model", "-m", type=str, help="Model to train", choices=["catdog", "animalseg", "headpos"], required=True)
+    parser.add_argument("--model", "-m", type=str, help="Model to train", choices=["catdog", "animalseg", "headpos", "race"], required=True)
     parser.add_argument("--workers", "-w", type=int, nargs=2, default=(8, 4), help="Number of workers for train and test, respectively")
     parser.add_argument("--batch-size", "-b", type=int, nargs=2, default=(64, 64), help="Batch size for train and test, respectively")
     parser.add_argument("--epochs", "-e", type=int, default=100, help="Number of epochs")
@@ -281,6 +421,7 @@ def __parse_args() -> argparse.Namespace:
     parser.add_argument("--optimizer", "-o", type=str, default="adam", help="Optimizer", choices=["adam", "sgd"])
     parser.add_argument("--device", "-d", type=str, default="auto", help="Device to train on")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose mode")
+    parser.add_argument("--model-version", "-mv", type=str, default="v1", help="Model version", choices=["v1", "v2"])
     return parser.parse_args()
 
 
@@ -288,7 +429,8 @@ if __name__ == "__main__":
     args = __parse_args()
     model_train_map: Dict[str, Callable] = {
         "catdog": train_dogcat_classifier,
-        "animalseg": train_animal_segmentation,
+        "race": train_race_classifier,
         "headpos": train_head_detection,
+        "animalseg": train_animal_segmentation,
     }
     model_train_map[args.model.lower()](**vars(args))

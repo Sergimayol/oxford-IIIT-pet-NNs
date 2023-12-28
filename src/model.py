@@ -4,41 +4,46 @@ import torch.nn as nn
 from torch import Tensor
 import torch.nn.functional as F
 from ultralytics import YOLO
+from typing import Optional
+
+
+class AlexNet(nn.Module):
+    def __init__(self, pretrained: bool = True, num_classes: int = 1000, freeze_backbone: bool = True):
+        super(AlexNet, self).__init__()
+        model = torch.hub.load("pytorch/vision:v0.10.0", "alexnet", pretrained=pretrained)
+        self.backbone: nn.Sequential = model.features
+        self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
+        self.classifier: nn.Sequential = model.classifier
+        self.classifier[6] = nn.Linear(4096, num_classes)
+        if pretrained and freeze_backbone:
+            self._freeze_backbone()
+
+    def _freeze_backbone(self) -> None:
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+
+    def forward(self, x) -> Tensor:
+        x = self.backbone(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
+        return x
 
 
 class CatDogClassifier(nn.Module):
-    """Cat and dog classifier. Architecture from AlexNet."""
+    """Cat and dog classifier. Base architecture from AlexNet."""
 
-    def __init__(self, num_classes: int = 2):
+    def __init__(self, base: Optional[AlexNet] = None, num_classes: int = 2):
         super(CatDogClassifier, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2),
-            nn.Conv2d(64, 192, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2),
-            nn.Conv2d(192, 384, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(384, 256, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2),
-            nn.Conv2d(256, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2),
-        )
-        self.avgpool = nn.AdaptiveAvgPool2d((8, 8))
+        if base is None:
+            base = AlexNet(pretrained=False, num_classes=num_classes)
+        self.features = base.backbone
+        self.avgpool = base.avgpool
         self.classifier = nn.Sequential(
-            nn.Dropout(),
-            nn.Linear(512 * 8 * 8, 2048),
+            nn.Dropout(0.5),
+            nn.Linear(256 * 6 * 6, 1024),
             nn.ReLU(inplace=True),
-            nn.Dropout(),
-            nn.Linear(2048, 1024),
-            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
             nn.Linear(1024, num_classes),
         )
 
@@ -50,50 +55,57 @@ class CatDogClassifier(nn.Module):
         return x
 
 
-class CatDogClassifier2(nn.Module):
-    def __init__(self, num_classes: int = 2):
-        super(CatDogClassifier2, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=10, kernel_size=3, stride=1, padding=1)  # 256x256x3 -> 256x256x10
-        self.mp1 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)  # 256x256x10 -> 128x128x10
-        self.conv2 = nn.Conv2d(in_channels=10, out_channels=20, kernel_size=3, stride=1, padding=1)  # 128x128x10 -> 128x128x20
-        self.mp2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)  # 128x128x20 -> 64x64x20
-        self.conv3 = nn.Conv2d(in_channels=20, out_channels=30, kernel_size=3, stride=1, padding=1)  # 64x64x20 -> 64x64x30
-        self.conv4 = nn.Conv2d(in_channels=30, out_channels=30, kernel_size=3, stride=1, padding=1)  # 64x64x30 -> 64x64x30
-        self.mp3 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)  # 64x64x30 -> 32x32x30
-        self.conv5 = nn.Conv2d(in_channels=30, out_channels=40, kernel_size=3, stride=1, padding=1)  # 32x32x30 -> 32x32x40
-        self.conv6 = nn.Conv2d(in_channels=40, out_channels=40, kernel_size=3, stride=1, padding=1)  # 32x32x40 -> 32x32x40
-        self.mp4 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)  # 32x32x40 -> 16x16x40
-        self.fc1 = nn.Linear(16 * 16 * 40, 1024)  # 16x16x40 -> 1024
-        self.dropout1 = nn.Dropout(0.5)
-        self.fc2 = nn.Linear(1024, 512)  # 1024 -> 512
-        self.dropout2 = nn.Dropout(0.5)
-        self.fc3 = nn.Linear(512, 256)  # 512 -> 256
-        self.dropout3 = nn.Dropout(0.5)
-        self.fc4 = nn.Linear(256, num_classes)  # 256 -> num_classes
+class CatDogClassifierV2(nn.Module):
+    """Cat and dog classifier V2."""
 
-    def forward(self, x):
-        x = self.mp1(F.relu(self.conv1(x)))
-        x = self.mp2(F.relu(self.conv2(x)))
-        x = F.relu(self.conv3(x))
-        x = F.relu(self.conv4(x))
-        x = self.mp3(x)
-        x = F.relu(self.conv5(x))
-        x = F.relu(self.conv6(x))
-        x = self.mp4(x)
-        x = x.view(-1, 16 * 16 * 40)
-        x = F.relu(self.fc1(x))
-        x = self.dropout1(x)
-        x = F.relu(self.fc2(x))
-        x = self.dropout2(x)
-        x = F.relu(self.fc3(x))
-        x = self.dropout3(x)
-        x = self.fc4(x)
+    def __init__(self, num_classes: int = 2):
+        super(CatDogClassifierV2, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=10, kernel_size=3, stride=1, padding=1),  # 256x256x3 -> 256x256x10
+            nn.MaxPool2d(kernel_size=2, stride=2, padding=0),  # 256x256x10 -> 128x128x10
+            nn.Conv2d(in_channels=10, out_channels=20, kernel_size=3, stride=1, padding=1),  # 128x128x10 -> 128x128x20
+            nn.MaxPool2d(kernel_size=2, stride=2, padding=0),  # 128x128x20 -> 64x64x20
+            nn.Conv2d(in_channels=20, out_channels=30, kernel_size=3, stride=1, padding=1),  # 64x64x20 -> 64x64x30
+            nn.Conv2d(in_channels=30, out_channels=30, kernel_size=3, stride=1, padding=1),  # 64x64x30 -> 64x64x30
+            nn.MaxPool2d(kernel_size=2, stride=2, padding=0),  # 64x64x30 -> 32x32x30
+            nn.Conv2d(in_channels=30, out_channels=40, kernel_size=3, stride=1, padding=1),  # 32x32x30 -> 32x32x40
+            nn.Conv2d(in_channels=40, out_channels=40, kernel_size=3, stride=1, padding=1),  # 32x32x40 -> 32x32x40
+            nn.MaxPool2d(kernel_size=2, stride=2, padding=0),  # 32x32x40 -> 16x16x40
+        )
+        self.classifier = nn.Sequential(
+            nn.Linear(16 * 16 * 40, 1024),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(1024, 512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(512, 256),
+            nn.Dropout(0.5),
+            nn.Linear(256, num_classes),
+        )
+
+    def forward(self, x) -> Tensor:
+        x = self.features(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
         return x
 
 
 class RaceClassifier(nn.Module):
-    def __init__(self, num_classes: int = 37):
+    def __init__(self, base: Optional[AlexNet] = None, num_classes: int = 37):
         super(RaceClassifier, self).__init__()
+        if base is None:
+            base = AlexNet(pretrained=True, num_classes=num_classes)
+        self.backbone = base.backbone
+        self.avgpool = base.avgpool
+        self.classifier = base.classifier
+
+    def forward(self, x) -> Tensor:
+        x = self.backbone(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.classifier(x)
+        return x
 
 
 class HeadDetection(nn.Module):
@@ -198,9 +210,61 @@ class AnimalSegmentationPretained(nn.Module):
     def __init__(self):
         super(AnimalSegmentationPretained, self).__init__()
         self.backbone = torch.hub.load("mateuszbuda/brain-segmentation-pytorch", "unet", in_channels=3, out_channels=1, init_features=32, pretrained=True)
+        # for param in self.backbone.parameters():
+        #    param.requires_grad = False
+        # self.backbone.conv = nn.Conv2d(in_channels=32, out_channels=3, kernel_size=1)
+        # for param in self.backbone.conv.parameters():
+        #    param.requires_grad = True
 
     def forward(self, x) -> Tensor:
-        return self.backbone(x)
+        x = self.backbone(x)
+        return torch.sigmoid(x)
+        # return self.backbone(x)
+
+
+class FCNHead(nn.Sequential):
+    def __init__(self, in_channels, channels, out_size):
+        inter_channels = in_channels // 4
+        layers = [
+            nn.Conv2d(in_channels, inter_channels, 3, padding=1, bias=False),
+            nn.BatchNorm2d(inter_channels),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1),
+            nn.Conv2d(inter_channels, channels, 1),
+            nn.Upsample(size=out_size, mode="bilinear", align_corners=True),
+        ]
+        super(FCNHead, self).__init__(*layers)
+
+
+class AnimalSegmentationPretained2(nn.Module):
+    """Animal segmentation model. Using pretrained model from mateuszbuda/brain-segmentation-pytorch"""
+
+    def __init__(self):
+        """Load the pretrained model and freeze the backbone
+        Output shape:
+            - Segmentation output: (N, 3, 256, 256)
+                * N is the batch size
+                * 3 is the number of classes (background, foreground, not classified)
+                * 256 is the image size
+        """
+        super(AnimalSegmentationPretained2, self).__init__()
+        # self.backbone: nn.Sequential = torch.hub.load("pytorch/vision:v0.10.0", "fcn_resnet50", pretrained=True).backbone
+        self.backbone = torch.hub.load("pytorch/vision:v0.10.0", "fcn_resnet50", pretrained=True)
+        # self.backbone, self.classifier = self.backbone.backbone, self.backbone.classifier
+        # self.backbone = self.backbone.backbone
+        for param in self.backbone.backbone.parameters():
+            param.requires_grad = False
+        # self.classifier = FCNHead(2048, 3, (256, 256))
+
+    def forward(self, x) -> Tensor:
+        x = self.backbone(x)
+        return x
+        return torch.sigmoid(x)
+
+    def forward2(self, x) -> Tensor:
+        x = self.backbone(x)
+        x = self.classifier(x)
+        return torch.sigmoid(x)
 
 
 class DiceLoss(nn.Module):
