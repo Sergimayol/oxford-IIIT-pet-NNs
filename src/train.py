@@ -1,6 +1,5 @@
 import os
 import uuid
-import wandb
 import torch
 import argparse
 import torch.nn as nn
@@ -96,6 +95,8 @@ def load_dataset(
     """
     Load the dataset and apply transformations.
     """
+    if dataset not in ["catdog", "animalseg", "race"]:
+        return None, None
     dataset_map = {"catdog": get_catdog_dataset, "animalseg": get_animalseg_dataset, "race": get_race_dataset}
     train_dataset, test_dataset = dataset_map[dataset.lower()]()
 
@@ -426,6 +427,7 @@ def __parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
+    import wandb
     args = __parse_args()
     model_train_map: Dict[str, Callable] = {
         "catdog": train_dogcat_classifier,
