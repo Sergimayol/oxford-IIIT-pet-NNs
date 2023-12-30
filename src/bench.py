@@ -1,28 +1,19 @@
-import cProfile
+"""Benchmarks for the project. Run with python -m src.bench --help for more info.
+Examples: 
+    - python ./src/bench.py -b race -mp D:/models/race_classifier_e3136a0b-77a1-4335-b833-55ed999a1a52.pth -v
+    - python ./src/bench.py -mv v1 -mp D:/models/cat_dog_classifier_c33726a6-07cb-43e4-86ec-43451067f06f.pth -v
+"""
 import torch
-import argparse
+import pandas as pd
+from tqdm import tqdm
 from ultralytics import YOLO
 from torch.utils.data import DataLoader
-from typing import List, Tuple, Optional, Dict, Callable, Literal
-from tqdm import tqdm
-import os
-import torch
-import argparse
-from torchvision import transforms
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
-import pandas as pd
+from typing import Dict, Callable, Literal
+import os, cProfile, argparse, contextlib, time, pstats
 
-from model import CatDogClassifier, CatDogClassifierV2, HeadDetection, RaceClassifier
+from model import CatDogClassifier, CatDogClassifierV2, RaceClassifier
 from train import load_dataset
-from utils import read_image
-import warnings
-
-from utils import DATA_DIR
-
-warnings.filterwarnings("ignore")
-
-import contextlib, time, pstats
+from utils import read_image, DATA_DIR
 
 
 class Timing(contextlib.ContextDecorator):
@@ -54,11 +45,15 @@ class Profiling(contextlib.ContextDecorator):
 
 
 def catdog_bench(
-    test_data: DataLoader, model_version: Literal["v1", "v2"] = "v1", device: str = "auto", model_path: str = None, **kwargs
-) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-    """Benchmark for the catdog classifier. Returns the accuracy and the inference time.
-    Runs a benchmark on home made model vs ultralytics model.
-    """
+    test_data: DataLoader,
+    model_version: Literal["v1", "v2"] = "v1",
+    device: str = "auto",
+    model_path: str = None,
+    verbose: bool = False,
+    profile: bool = False,
+    **kwargs,
+):
+    """Benchmark for the catdog classifier. Returns the accuracy and the inference time. Runs a benchmark on home made model vs ultralytics model."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
     yolo = YOLO("yolov8x.pt").to(device)
     model = CatDogClassifier() if model_version == "v1" else CatDogClassifierV2()
@@ -67,66 +62,80 @@ def catdog_bench(
     model.eval()
 
     acc, acc_yolo = 0.0, 0.0
-    st = time.perf_counter_ns()
-    for img, label in tqdm(test_data, desc="CatDog benchmark"):
-        img, label = img.to(device), label.to(device)
-        with torch.no_grad():
-            outputs = model(img)
-            outputs = torch.softmax(outputs, dim=1)
-            pred = outputs.argmax(dim=1, keepdim=True)
-            acc += pred.eq(label.view_as(pred)).sum().item()
-    et = time.perf_counter_ns() - st
-    model_time = et * 1e-9
+    with Profiling(enabled=profile):
+        st = time.perf_counter_ns()
+        for img, label in tqdm(test_data, desc="CatDog benchmark", total=len(test_data), disable=not verbose):
+            img, label = img.to(device), label.to(device)
+            with torch.no_grad():
+                outputs = model(img)
+                outputs = torch.softmax(outputs, dim=1)
+                pred = outputs.argmax(dim=1, keepdim=True)
+                acc += pred.eq(label.view_as(pred)).sum().item()
+        et = time.perf_counter_ns() - st
+        model_time = et * 1e-9
 
-    path = os.path.join(DATA_DIR, "annotations", "test.csv")
-    df = pd.read_csv(path)
+    df = pd.read_csv(os.path.join(DATA_DIR, "annotations", "test.csv"))
     imgs = df["filename"].apply(lambda x: read_image(os.path.join(DATA_DIR, "images", f"{x}.jpg")))
     labels = df["species"]
 
-    st = time.perf_counter_ns()
-    for img, label in tqdm(zip(imgs, labels), desc="YOLO benchmark", total=len(imgs)):
-        with torch.no_grad():
-            outputs = yolo.predict(img, verbose=False)
-            result = outputs[0]
-            if len(result) == 0:
-                continue
-            for box in result.boxes:
-                class_id = result.names[box.cls[0].item()]
-                if (class_id == "cat" and label == 0) or (class_id == "dog" and label == 1):
-                    acc_yolo += 1
-                    break
-    et = time.perf_counter_ns() - st
-    yolo_time = et * 1e-9
+    with Profiling(enabled=profile):
+        st = time.perf_counter_ns()
+        for img, label in tqdm(zip(imgs, labels), desc="YOLO benchmark", total=len(imgs), disable=not verbose):
+            with torch.no_grad():
+                outputs = yolo.predict(img, verbose=False)
+                result = outputs[0]
+                if len(result) == 0:
+                    continue
+                for box in result.boxes:
+                    class_id = result.names[box.cls[0].item()]
+                    if (class_id == "cat" and label == 0) or (class_id == "dog" and label == 1):
+                        acc_yolo += 1
+                        break
+        et = time.perf_counter_ns() - st
+        yolo_time = et * 1e-9
     accuracy = acc / len(test_data.dataset)
     accuracy_yolo = acc_yolo / len(test_data.dataset)
-    print(f"[INFO] Accuracy: {accuracy*100:.2f}%, Accuracy YOLO: {accuracy_yolo*100:.2f}%")
-    return (accuracy, model_time), (accuracy_yolo, yolo_time)
+    print(f"[INFO] Accuracy: {accuracy*100:.2f}%, Accuracy YOLO: {accuracy_yolo*100:.2f}% | Model time: {model_time:.2f}s, YOLO time: {yolo_time:.2f}s")
 
 
-def headpos_bench(test_data: DataLoader, **kwargs) -> Tuple[float, float]:
-    pass
-
-
-def race_bench(test_data: DataLoader, **kwargs) -> Tuple[float, float]:
-    pass
+def race_bench(test_data: DataLoader, device: str = "auto", model_path: str = None, verbose: bool = False, profile: bool = False, **kwargs):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
+    model = RaceClassifier()
+    model = model.to(device)
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+    acc = 0.0
+    with Profiling(enabled=profile):
+        st = time.perf_counter_ns()
+        for img, label in tqdm(test_data, desc="CatDog benchmark", total=len(test_data), disable=not verbose):
+            img, label = img.to(device), label.to(device)
+            with torch.no_grad():
+                outputs = model(img)
+                outputs = torch.softmax(outputs, dim=1)
+                pred = outputs.argmax(dim=1, keepdim=True)
+                acc += pred.eq(label.view_as(pred)).sum().item()
+        et = time.perf_counter_ns() - st
+        model_time = et * 1e-9
+    accuracy = acc / len(test_data.dataset)
+    print(f"[INFO] Accuracy: {accuracy*100:.2f}% | Model time: {model_time:.2f}s")
 
 
 def __argparse():
     parser = argparse.ArgumentParser(description="Benchmarks for the project")
-    parser.add_argument("--bench", "-b", type=str, default="catdog", help="Benchmarks to run", choices=["catdog", "headpos", "race"])
+    parser.add_argument("--bench", "-b", type=str, default="catdog", help="Benchmarks to run", choices=["catdog", "race"])
     parser.add_argument("--model-version", "-mv", type=str, default="v1", help="Model version", choices=["v1", "v2"])
     parser.add_argument("--model-path", "-mp", type=str, required=True, help="Path to the model (pth file)")
-    parser.add_argument("--results-path", "-rp", type=str, default="results", help="Path to the results")
     parser.add_argument("--device", "-d", type=str, default="auto", help="Device to bench on")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose mode")
+    parser.add_argument("--profile", "-p", action="store_true", help="Profile mode")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = __argparse()
-    print(args)
-    bench_map: Dict[str, Callable] = {"catdog": catdog_bench, "headpos": headpos_bench, "race": race_bench}
+    bench_map: Dict[str, Callable] = {"catdog": catdog_bench, "race": race_bench}
     bench: str = args.bench
     print(f"[INFO] Running benchmark {bench}")
-    _, test_data = load_dataset(bench, workers=(1, 4), batch_size=(1, 1))
-    results = bench_map[bench](test_data, **vars(args))
-    print(results)
+    with Timing(prefix="[INFO] Total time: "):
+        _, test_data = load_dataset(bench, workers=(1, 1), batch_size=(1, 1))
+        bench_map[bench](test_data, **vars(args))

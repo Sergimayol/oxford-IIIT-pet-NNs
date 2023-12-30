@@ -111,9 +111,9 @@ class RaceClassifier(nn.Module):
 class HeadDetection(nn.Module):
     """Head detection model. Using pretrained model YOLOv8"""
 
-    def __init__(self):
+    def __init__(self, model_path: str = "yolov8n.pt"):
         super(HeadDetection, self).__init__()
-        self.backbone = YOLO("yolov8n.pt")
+        self.backbone = YOLO(model_path)
 
     def forward(self, x) -> Tensor:
         return self.backbone(x)
