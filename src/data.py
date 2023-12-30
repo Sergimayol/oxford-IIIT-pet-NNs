@@ -1,7 +1,6 @@
 import os
 import argparse
 import pandas as pd
-import torch
 from tqdm import tqdm
 from shutil import copy
 import xml.etree.ElementTree as ET

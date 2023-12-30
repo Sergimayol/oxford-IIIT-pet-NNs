@@ -1,9 +1,10 @@
-import os
 import tarfile
 import urllib.request
 from tqdm import tqdm
 from PIL import Image
 from typing import Callable
+from torchinfo import summary
+import os, time, contextlib, cProfile, pstats
 
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
@@ -33,9 +34,7 @@ def _tqdm_hook(t: tqdm) -> Callable[[int, int, int], None]:
     return inner
 
 
-def download_dataset(
-    url: str = DATASET_URL, ground_truth_url: str = DATASET_GROUND_TRUTH_URL, data_dir: str = DATA_DIR, force: bool = False
-):
+def download_dataset(url: str = DATASET_URL, ground_truth_url: str = DATASET_GROUND_TRUTH_URL, data_dir: str = DATA_DIR, force: bool = False):
     """Download data from the web and save it to the data directory."""
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
@@ -97,3 +96,38 @@ def create_multiple_dirs(dir_names: list):
     """Create multiple directories."""
     for dir_name in dir_names:
         create_dir(dir_name)
+
+
+def print_model_summary(model, input_size, verbose: bool = True):
+    """Print model summary."""
+    if verbose:
+        print(model)
+        summary(model, input_size=input_size)
+
+
+class Timing(contextlib.ContextDecorator):
+    def __init__(self, prefix="", on_exit=None, enabled=True):
+        self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
+
+    def __enter__(self):
+        self.st = time.perf_counter_ns()
+
+    def __exit__(self, *exc):
+        self.et = time.perf_counter_ns() - self.st
+        if self.enabled:
+            print(f"{self.prefix}{self.et*1e-6:.2f} ms" + (self.on_exit(self.et) if self.on_exit else ""))
+
+
+class Profiling(contextlib.ContextDecorator):
+    def __init__(self, enabled=True, sort="cumtime", frac=0.2):
+        self.enabled, self.sort, self.frac = enabled, sort, frac
+
+    def __enter__(self):
+        self.pr = cProfile.Profile(timer=lambda: int(time.time() * 1e9), timeunit=1e-6)
+        if self.enabled:
+            self.pr.enable()
+
+    def __exit__(self, *exc):
+        if self.enabled:
+            self.pr.disable()
+            pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort).print_stats(self.frac)
