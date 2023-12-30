@@ -43,12 +43,6 @@ python src/train.py --help
 python src/data.py --help
 ```
 
-### Predicción
-
-```shell
-python src/sample.py --help
-```
-
 ### Benchmark
 
 ```shell
