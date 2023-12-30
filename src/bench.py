@@ -9,7 +9,7 @@ from tqdm import tqdm
 from ultralytics import YOLO
 from torch.utils.data import DataLoader
 from typing import Dict, Callable, Literal
-import os, cProfile, argparse, contextlib, time, pstats
+import os, cProfile, argparse, contextlib, time, pstats, warnings
 
 from model import CatDogClassifier, CatDogClassifierV2, RaceClassifier
 from train import load_dataset
@@ -132,6 +132,7 @@ def __argparse():
 
 
 if __name__ == "__main__":
+    warnings.filterwarnings("ignore")
     args = __argparse()
     bench_map: Dict[str, Callable] = {"catdog": catdog_bench, "race": race_bench}
     bench: str = args.bench
