@@ -4,11 +4,12 @@
 
 ```shell
 .
-├── src
+├── src/
 │   ├── model.py
 │   ├── train.py
-│   └── sample.py
+│   └── bench.py
 ├── data/
+├── docs/
 ├── LICENSE
 └── README.md
 ```
@@ -46,7 +47,7 @@ python src/data.py --help
 ### Benchmark
 
 ```shell
-python src/benchmark.py --help
+python src/bench.py --help
 ```
 
 ## Licencia

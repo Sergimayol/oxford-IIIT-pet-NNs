@@ -102,7 +102,8 @@ def print_model_summary(model, input_size, verbose: bool = True):
     """Print model summary."""
     if verbose:
         print(model)
-        summary(model, input_size=input_size)
+        if input_size is not None:
+            summary(model, input_size=input_size)
 
 
 class Timing(contextlib.ContextDecorator):

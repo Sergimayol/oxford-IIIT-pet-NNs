@@ -116,7 +116,7 @@ class HeadDetection(nn.Module):
         self.backbone = YOLO(model_path)
 
     def forward(self, x) -> Tensor:
-        return self.backbone(x)
+        return self.backbone.predict(x)
 
 
 class AnimalSegmentation(nn.Module):
