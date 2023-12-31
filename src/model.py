@@ -1,10 +1,9 @@
-from collections import OrderedDict
 import torch
 import torch.nn as nn
 from torch import Tensor
-import torch.nn.functional as F
-from ultralytics import YOLO
 from typing import Optional
+from ultralytics import YOLO
+from collections import OrderedDict
 
 
 class AlexNet(nn.Module):
