@@ -7,9 +7,12 @@
 ├── src/
 │   ├── model.py
 │   ├── train.py
+│   ├── data.py
+│   ├── architectures.py
 │   └── bench.py
 ├── data/
 ├── docs/
+├── notebooks/
 ├── LICENSE
 └── README.md
 ```
@@ -32,22 +35,28 @@ pip install -r requirements.txt
 
 ## Uso
 
-### Entrenamiento
-
-```shell
-python src/train.py --help
-```
-
 ### Prepación de datos
 
 ```shell
-python src/data.py --help
+python src/data.py -h
+```
+
+### Entrenamiento
+
+```shell
+python src/train.py -h
 ```
 
 ### Benchmark
 
 ```shell
-python src/bench.py --help
+python src/bench.py -h
+```
+
+## Arquitectura
+
+```shell
+python src/architectures.py
 ```
 
 ## Licencia

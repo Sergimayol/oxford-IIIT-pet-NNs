@@ -1,6 +1,7 @@
 import os
 import argparse
 import pandas as pd
+from torch import Tensor
 from tqdm import tqdm
 from shutil import copy
 import xml.etree.ElementTree as ET
@@ -26,15 +27,11 @@ class CatDogDataset(Dataset):
         self.transform = transform
 
     def __len__(self):
-        """
-        Return the length of the dataset.
-        """
+        """Return the length of the dataset."""
         return len(self.annotations)
 
     def __getitem__(self, idx):
-        """
-        Get a sample from the dataset.
-        """
+        """Get a sample from the dataset."""
         img_path = os.path.join(self.root_dir, self.annotations.iloc[idx, 0])
         image = read_image(img_path + ".jpg")
         label = self.annotations.iloc[idx, 1]
@@ -61,25 +58,23 @@ class AnimalSegmentationDataset(Dataset):
         self.transform = transform
 
     def __len__(self):
-        """
-        Return the length of the dataset.
-        """
+        """Return the length of the dataset."""
         return len(self.annotations)
 
     def __getitem__(self, idx):
-        """
-        Get a sample from the dataset.
-        """
+        """Get a sample from the dataset."""
         img_path = os.path.join(self.root_dir, self.annotations.iloc[idx, 0])
         trimap_path = os.path.join(self.trimap_dir, self.annotations.iloc[idx, 0])
-        image = read_image(img_path + ".jpg")
-        label = read_image(trimap_path + ".png", mode="L")
+        image, label = read_image(img_path + ".jpg"), read_image(trimap_path + ".png", mode="L")
         if self.transform:
             assert len(self.transform) == 2, "The transform must be a tuple of two elements"
             image = self.transform[0](image)
-            label = self.transform[1](label)  # .to(torch.int64)
-            # label *= 255
-        return image, label  # .squeeze()
+            label: Tensor = (self.transform[1](label) * 255).long()
+            label[label == 1] = 1
+            label[label == 2] = 0
+            label[label == 3] = 1
+            label = label.float() / 255
+        return image, label
 
 
 class RaceDataset(Dataset):

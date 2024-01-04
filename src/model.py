@@ -118,6 +118,64 @@ class HeadDetection(nn.Module):
         return self.backbone.predict(x)
 
 
+class AnimalSegmentationPretained(nn.Module):
+    """Animal segmentation model. Using pretrained model from mateuszbuda/brain-segmentation-pytorch"""
+
+    def __init__(self):
+        super(AnimalSegmentationPretained, self).__init__()
+        self.backbone = torch.hub.load("mateuszbuda/brain-segmentation-pytorch", "unet", in_channels=3, out_channels=1, init_features=32, pretrained=True)
+
+    def forward(self, x) -> Tensor:
+        x = self.backbone(x)
+        return torch.sigmoid(x)
+
+
+class FCNHead(nn.Sequential):
+    def __init__(self, in_channels, channels, out_size):
+        inter_channels = in_channels // 4
+        layers = [
+            nn.Conv2d(in_channels, inter_channels, 3, padding=1, bias=False),
+            nn.BatchNorm2d(inter_channels),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1),
+            nn.Conv2d(inter_channels, channels, 1),
+            nn.Upsample(size=out_size, mode="bilinear", align_corners=True),
+        ]
+        super(FCNHead, self).__init__(*layers)
+
+
+class AnimalSegmentationPretained2(nn.Module):
+    """Animal segmentation model. Using pretrained model from mateuszbuda/brain-segmentation-pytorch"""
+
+    def __init__(self):
+        super(AnimalSegmentationPretained2, self).__init__()
+        self.backbone: nn.Sequential = torch.hub.load("pytorch/vision:v0.10.0", "fcn_resnet50", pretrained=True).backbone
+        for param in self.backbone.parameters():
+            param.requires_grad = False
+        self.classifier = FCNHead(2048, 1, (256, 256))
+
+    def forward(self, x) -> Tensor:
+        x = self.backbone(x)["out"]
+        x = self.classifier(x)
+        return torch.sigmoid(x)
+
+
+class DiceLoss(nn.Module):
+    """Dice loss for segmentation tasks. https://github.com/mateuszbuda/brain-segmentation-pytorch/blob/master/loss.py"""
+
+    def __init__(self, smooth: float = 0.0):
+        super(DiceLoss, self).__init__()
+        self.smooth = smooth
+
+    def forward(self, y_pred: Tensor, y_true: Tensor) -> Tensor:
+        assert y_pred.size() == y_true.size(), f"Predicted and ground truth sizes do not match {y_pred.size()} != {y_true.size()}"
+        y_pred = y_pred[:, 0].contiguous().view(-1)
+        y_true = y_true[:, 0].contiguous().view(-1)
+        intersection = (y_pred * y_true).sum()
+        dsc = (2.0 * intersection + self.smooth) / (y_pred.sum() + y_true.sum() + self.smooth)
+        return 1.0 - dsc
+
+
 class AnimalSegmentation(nn.Module):
     """Animal segmentation model. Architecture from https://github.com/mateuszbuda/brain-segmentation-pytorch/blob/master/unet.py"""
 
@@ -201,82 +259,3 @@ class AnimalSegmentation(nn.Module):
                 ]
             )
         )
-
-
-class AnimalSegmentationPretained(nn.Module):
-    """Animal segmentation model. Using pretrained model from mateuszbuda/brain-segmentation-pytorch"""
-
-    def __init__(self):
-        super(AnimalSegmentationPretained, self).__init__()
-        self.backbone = torch.hub.load("mateuszbuda/brain-segmentation-pytorch", "unet", in_channels=3, out_channels=1, init_features=32, pretrained=True)
-        # for param in self.backbone.parameters():
-        #    param.requires_grad = False
-        # self.backbone.conv = nn.Conv2d(in_channels=32, out_channels=3, kernel_size=1)
-        # for param in self.backbone.conv.parameters():
-        #    param.requires_grad = True
-
-    def forward(self, x) -> Tensor:
-        x = self.backbone(x)
-        return torch.sigmoid(x)
-        # return self.backbone(x)
-
-
-class FCNHead(nn.Sequential):
-    def __init__(self, in_channels, channels, out_size):
-        inter_channels = in_channels // 4
-        layers = [
-            nn.Conv2d(in_channels, inter_channels, 3, padding=1, bias=False),
-            nn.BatchNorm2d(inter_channels),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.1),
-            nn.Conv2d(inter_channels, channels, 1),
-            nn.Upsample(size=out_size, mode="bilinear", align_corners=True),
-        ]
-        super(FCNHead, self).__init__(*layers)
-
-
-class AnimalSegmentationPretained2(nn.Module):
-    """Animal segmentation model. Using pretrained model from mateuszbuda/brain-segmentation-pytorch"""
-
-    def __init__(self):
-        """Load the pretrained model and freeze the backbone
-        Output shape:
-            - Segmentation output: (N, 3, 256, 256)
-                * N is the batch size
-                * 3 is the number of classes (background, foreground, not classified)
-                * 256 is the image size
-        """
-        super(AnimalSegmentationPretained2, self).__init__()
-        # self.backbone: nn.Sequential = torch.hub.load("pytorch/vision:v0.10.0", "fcn_resnet50", pretrained=True).backbone
-        self.backbone = torch.hub.load("pytorch/vision:v0.10.0", "fcn_resnet50", pretrained=True)
-        # self.backbone, self.classifier = self.backbone.backbone, self.backbone.classifier
-        # self.backbone = self.backbone.backbone
-        for param in self.backbone.backbone.parameters():
-            param.requires_grad = False
-        # self.classifier = FCNHead(2048, 3, (256, 256))
-
-    def forward(self, x) -> Tensor:
-        x = self.backbone(x)
-        return x
-        return torch.sigmoid(x)
-
-    def forward2(self, x) -> Tensor:
-        x = self.backbone(x)
-        x = self.classifier(x)
-        return torch.sigmoid(x)
-
-
-class DiceLoss(nn.Module):
-    """Dice loss for segmentation tasks. https://github.com/mateuszbuda/brain-segmentation-pytorch/blob/master/loss.py"""
-
-    def __init__(self, smooth: float = 0.0):
-        super(DiceLoss, self).__init__()
-        self.smooth = smooth
-
-    def forward(self, y_pred, y_true):
-        assert y_pred.size() == y_true.size(), f"Predicted and ground truth sizes do not match {y_pred.size()} != {y_true.size()}"
-        y_pred = y_pred[:, 0].contiguous().view(-1)
-        y_true = y_true[:, 0].contiguous().view(-1)
-        intersection = (y_pred * y_true).sum()
-        dsc = (2.0 * intersection + self.smooth) / (y_pred.sum() + y_true.sum() + self.smooth)
-        return 1.0 - dsc

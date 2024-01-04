@@ -3,7 +3,7 @@ import torch
 from torchvision import transforms
 import matplotlib.pyplot as plt
 
-from model import CatDogClassifier, AnimalSegmentationPretained
+from model import AnimalSegmentationPretained2, CatDogClassifier, AnimalSegmentationPretained
 from train import get_animalseg_dataset
 from utils import DATA_DIR, read_image, MODELS_DIR
 
@@ -46,6 +46,7 @@ def trimap2f(t, trimap):
     return (t(trimap) * 255.0 - 1) / 2
 
 if __name__ == "__main__":
+    r"""
     import cv2
     from torchvision import transforms 
 
@@ -80,7 +81,6 @@ if __name__ == "__main__":
     plt.imshow(t(img))
     plt.show()
     exit()
-
     # https://www.kaggle.com/code/dhruv4930/oxford-iiit-pets-segmentation-using-pytorch#Trimap-Legend
     tr, tt = get_animalseg_dataset()
     # Show a batch of images
@@ -132,7 +132,6 @@ if __name__ == "__main__":
         _, predicted = torch.max(output.data, 1)
         print(label_map[predicted.item()])
 
-    """
     import torchvision
 
     model = torchvision.models.segmentation.fcn_resnet50(pretrained=True, progress=True).to(device)
@@ -195,16 +194,19 @@ if __name__ == "__main__":
     cv2.imshow("Image", image)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-    "animal_segmentation_f30b3c2e-dfb8-4355-a9b7-36836a4636ac-16"
+
+    """
     #model = AnimalSegmentationPretained()
-    model = torch.hub.load("pytorch/vision:v0.10.0", "fcn_resnet50", pretrained=True)
+    model = AnimalSegmentationPretained2()
+    #model = torch.hub.load("pytorch/vision:v0.10.0", "fcn_resnet50", pretrained=True)
     model.to("cuda")
-    #path = os.path.join(MODELS_DIR, "animal_segmentation_f30b3c2e-dfb8-4355-a9b7-36836a4636ac-16.pth")
-    #model.load_state_dict(torch.load(path))
+    path = os.path.join(MODELS_DIR, "animal_segmentation_983842c5-885a-4ca7-9642-20ae324fbb40.pth")
+    path = os.path.join(MODELS_DIR, "animal_segmentation_e460a04b-fd87-479f-a0d5-a36392ccc882.pth")
+    model.load_state_dict(torch.load(path))
     model.eval()
-    img1 = read_image(os.path.join(DATA_DIR, "tests", "c.jpg"))
-    img2 = read_image(os.path.join(DATA_DIR, "tests", "d.jpg"))
-    img3 = read_image(os.path.join(DATA_DIR, "tests", "a.jpg"))
+    img1 = read_image(os.path.join(DATA_DIR, "tests", "a.jpg"))
+    img2 = read_image(os.path.join(DATA_DIR, "tests", "japanese_chin_135.jpg"))
+    img3 = read_image(os.path.join(DATA_DIR, "tests", "saint_bernard_114.jpg"))
     transform = transforms.Compose(
         [
             transforms.Resize((256, 256)),
@@ -216,16 +218,12 @@ if __name__ == "__main__":
     img3 = transform(img3).unsqueeze(0).to("cuda")
 
     with torch.no_grad():
-        output = model(img1)["out"][0]
-        output = output.argmax(0)
+        output = model(img1)[0]
         plt.imshow(output.cpu().numpy().squeeze())
         plt.show()
-        output = model(img2)["out"][0]
-        output = output.argmax(0)
+        output = model(img2)[0]
         plt.imshow(output.cpu().numpy().squeeze())
         plt.show()
-        output = model(img3)["out"][0]
-        output = output.argmax(0)
+        output = model(img3)[0]
         plt.imshow(output.cpu().numpy().squeeze())
         plt.show()
-    """

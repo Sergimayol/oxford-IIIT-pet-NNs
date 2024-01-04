@@ -36,7 +36,7 @@ def get_catdog_dataset() -> Tuple[Dataset, Dataset]:
     )
     transform2 = transforms.Compose(
         [transforms.Resize((256, 256)), transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])]
-    )  # Run: 95071d40-0781-4e61-9509-b5ace306818d
+    )
     train_dataset = CatDogDataset(csv_file=os.path.join(DATA_DIR, "annotations", "train.csv"), root_dir=IMAGES_DIR, transform=transform)
     test_dataset = CatDogDataset(csv_file=os.path.join(DATA_DIR, "annotations", "test.csv"), root_dir=IMAGES_DIR, transform=transform2)
 
@@ -92,9 +92,7 @@ def get_race_dataset() -> Tuple[Dataset, Dataset]:
 def load_dataset(
     dataset: Literal["catdog", "animalseg", "race"], workers: Tuple[int, int] = (8, 4), batch_size: Tuple[int, int] = (64, 64)
 ) -> Tuple[DataLoader, DataLoader]:
-    """
-    Load the dataset and apply transformations.
-    """
+    """Load the dataset and apply transformations."""
     if dataset not in ["catdog", "animalseg", "race"]:
         return None, None
     dataset_map = {"catdog": get_catdog_dataset, "animalseg": get_animalseg_dataset, "race": get_race_dataset}
@@ -108,6 +106,77 @@ def load_dataset(
 
 def get_device(device: str = "auto") -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
+
+
+def train(
+    model: nn.Module,
+    train_loader: DataLoader,
+    criterion: nn.Module,
+    opt: torch.optim.Optimizer,
+    epoch: int,
+    epochs: int,
+    device: str,
+    calc_acc: bool = True,
+    verbose: bool = False,
+) -> Tuple[float, float]:
+    train_loss, train_acc = 0.0, 0.0
+    model.train()
+    t = tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epochs}", disable=not verbose)
+    for i, (inputs, labels) in t:
+        inputs, labels = inputs.to(device), labels.to(device)
+
+        opt.zero_grad()
+
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        opt.step()
+
+        train_loss += loss.item()
+        if calc_acc:
+            outputs = torch.softmax(outputs, dim=1)
+            pred = outputs.argmax(dim=1, keepdim=True)
+            train_acc += pred.eq(labels.view_as(pred)).sum().item()
+            postfix_data = {"loss": train_loss / ((i + 1) * train_loader.batch_size), "acc": train_acc / ((i + 1) * train_loader.batch_size)}
+        else:
+            postfix_data = {"loss": train_loss / ((i + 1) * train_loader.batch_size)}
+
+        t.set_postfix(**postfix_data)
+
+    t_loss = train_loss / len(train_loader.dataset)
+    t_acc = train_acc / len(train_loader.dataset)
+
+    return t_loss, t_acc
+
+
+def validate(
+    model: nn.Module, test_loader: DataLoader, criterion: nn.Module, epoch: int, epochs: int, device: str, calc_acc: bool = True, verbose: bool = False
+) -> Tuple[float, float]:
+    val_loss, val_acc = 0.0, 0.0
+    model.eval()
+    with torch.no_grad():
+        t = tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epochs}", disable=not verbose)
+        for i, (inputs, labels) in t:
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+
+            val_loss += loss.item()
+            if calc_acc:
+                outputs = torch.softmax(outputs, dim=1)
+                pred = outputs.argmax(dim=1, keepdim=True)
+                val_acc += pred.eq(labels.view_as(pred)).sum().item()
+                postfix_data = {"loss": val_loss / ((i + 1) * test_loader.batch_size), "acc": val_acc / ((i + 1) * test_loader.batch_size)}
+            else:
+                postfix_data = {"loss": val_loss / ((i + 1) * test_loader.batch_size)}
+
+            t.set_postfix(**postfix_data)
+
+    tt_loss = val_loss / len(test_loader.dataset)
+    tt_acc = val_acc / len(test_loader.dataset)
+
+    return tt_loss, tt_acc
 
 
 def train_dogcat_classifier(
@@ -131,77 +200,40 @@ def train_dogcat_classifier(
     opt = torch.optim.Adam(model.parameters(), lr=lr) if optimizer == "adam" else torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum)
 
     train_loader, test_loader = load_dataset("catdog", workers=workers, batch_size=batch_size)
-    wandb.init(
-        project="cat-dog-classifier",
-        name=f"{run_uuid}",
-        config={
-            "epochs": epochs,
-            "batch_size": batch_size,
-            "device": device,
-            "optimizer": str(opt),
-            "lr": lr,
-            "loss": "cross_entropy with reduction=sum",
-            "dataset": "cat_dog_dataset",
-            "architecture": str(model),
-        },
-    )
+
+    if USE_WANDB:
+        wandb.init(
+            project="cat-dog-classifier",
+            name=f"{run_uuid}",
+            config={
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "device": device,
+                "optimizer": str(opt),
+                "lr": lr,
+                "loss": "cross_entropy with reduction=sum",
+                "dataset": "cat_dog_dataset",
+                "architecture": str(model),
+            },
+        )
 
     print_model_summary(model, input_size=(1, 3, 256, 256), verbose=verbose)
 
     min_loss = 10000000
     for epoch in range(epochs):
-        train_loss = 0.0
-        train_acc = 0.0
-        model.train()
+        train_loss, train_acc = train(model, train_loader, criterion, opt, epoch, epochs, device, verbose=verbose)
+        val_loss, val_acc = validate(model, test_loader, criterion, epoch, epochs, device, verbose=verbose)
 
-        t = tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epochs}", disable=not verbose)
-        for i, (inputs, labels) in t:
-            inputs, labels = inputs.to(device), labels.to(device)
+        if USE_WANDB:
+            wandb.log({"val_loss": val_loss, "val_acc": val_acc, "train_loss": train_loss, "train_acc": train_acc})
 
-            opt.zero_grad()
-
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            opt.step()
-
-            train_loss += loss.item()
-            outputs = torch.softmax(outputs, dim=1)
-            pred = outputs.argmax(dim=1, keepdim=True)
-            train_acc += pred.eq(labels.view_as(pred)).sum().item()
-
-            t.set_postfix(loss=train_loss / ((i + 1) * train_loader.batch_size), acc=train_acc / ((i + 1) * train_loader.batch_size))
-
-        val_loss, val_acc = 0.0, 0.0
-        model.eval()
-        with torch.no_grad():
-            t = tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epochs}", disable=not verbose)
-            for i, (inputs, labels) in t:
-                inputs, labels = inputs.to(device), labels.to(device)
-
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-
-                val_loss += loss.item()
-                outputs = torch.softmax(outputs, dim=1)
-                pred = outputs.argmax(dim=1, keepdim=True)
-                val_acc += pred.eq(labels.view_as(pred)).sum().item()
-
-                t.set_postfix(loss=val_loss / ((i + 1) * test_loader.batch_size), acc=val_acc / ((i + 1) * test_loader.batch_size))
-
-        tt_loss = val_loss / len(test_loader.dataset)
-        tt_acc = val_acc / len(test_loader.dataset)
-        t_loss = train_loss / len(train_loader.dataset)
-        t_acc = train_acc / len(train_loader.dataset)
-
-        wandb.log({"val_loss": tt_loss, "val_acc": tt_acc, "train_loss": t_loss, "train_acc": t_acc})
-
-        if tt_loss < min_loss:
-            min_loss = tt_loss
+        if val_loss < min_loss:
+            min_loss = val_loss
             torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"cat_dog_classifier_{run_uuid}.pth"))
 
     torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"cat_dog_classifier_{run_uuid}_final.pth"))
-    wandb.finish()
+    if USE_WANDB:
+        wandb.finish()
 
 
 def train_animal_segmentation(
@@ -212,82 +244,52 @@ def train_animal_segmentation(
     optimizer: Literal["adam", "sgd"] = "adam",
     momentum: float = 0.9,
     device: str = "auto",
+    model_version: Literal["v1", "v2"] = "v1",
     verbose: bool = False,
     **kwargs,
 ):
     run_uuid = uuid.uuid4()
     device = get_device(device)
-    model = AnimalSegmentation().to(device)
-    model(torch.randn(1, 3, 256, 256).to(device))
-
-    print_model_summary(model, input_size=(1, 3, 256, 256), verbose=verbose)
+    model = AnimalSegmentationPretained() if model_version == "v1" else AnimalSegmentationPretained2()
+    model = model.to(device)
 
     criterion = DiceLoss()
     opt = torch.optim.Adam(model.parameters(), lr=lr) if optimizer == "adam" else torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum)
 
     train_loader, test_loader = load_dataset("animalseg", workers=workers, batch_size=batch_size)
-    wandb.init(
-        project="animal-segmentation",
-        name=f"{run_uuid}",
-        config={
-            "epochs": epochs,
-            "batch_size": batch_size,
-            "device": device,
-            "optimizer": str(opt),
-            "lr": lr,
-            "loss": "dice loss",
-            "dataset": "animal_segmentation_dataset",
-            "architecture": str(model),
-        },
-    )
+    if USE_WANDB:
+        wandb.init(
+            project="animal-segmentation",
+            name=f"{run_uuid}",
+            config={
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "device": device,
+                "optimizer": str(opt),
+                "lr": lr,
+                "loss": "dice loss",
+                "dataset": "animal_segmentation_dataset",
+                "architecture": str(model),
+            },
+        )
+
+    print_model_summary(model, input_size=(1, 3, 256, 256), verbose=verbose)
 
     min_loss = 10000000
     for epoch in range(epochs):
-        train_loss = 0.0
-        model.train()
+        train_loss, _ = train(model, train_loader, criterion, opt, epoch, epochs, device, verbose=verbose, calc_acc=False)
+        val_loss, _ = validate(model, test_loader, criterion, epoch, epochs, device, verbose=verbose, calc_acc=False)
 
-        for i, (inputs, labels) in (
-            t := tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epochs}", disable=not verbose)
-        ):
-            inputs, labels = inputs.to(device), labels.to(device)
+        if USE_WANDB:
+            wandb.log({"val_loss": val_loss, "train_loss": train_loss})
 
-            opt.zero_grad()
-
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            opt.step()
-
-            train_loss += loss.item()
-
-            t.set_postfix(loss=train_loss / ((i + 1) * train_loader.batch_size))
-
-        val_loss = 0.0
-        model.eval()
-        with torch.no_grad():
-            for i, (inputs, labels) in (
-                t := tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epochs}", disable=not verbose)
-            ):
-                inputs, labels = inputs.to(device), labels.to(device)
-
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-
-                val_loss += loss.item()
-
-                t.set_postfix(loss=val_loss / ((i + 1) * test_loader.batch_size))
-
-        tt_loss = val_loss / len(test_loader.dataset)
-        t_loss = train_loss / len(train_loader.dataset)
-
-        wandb.log({"val_loss": tt_loss, "train_loss": t_loss})
-
-        if tt_loss < min_loss:
-            min_loss = tt_loss
+        if val_loss < min_loss:
+            min_loss = val_loss
             torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"animal_segmentation_{run_uuid}.pth"))
 
     torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"animal_segmentation_{run_uuid}_final.pth"))
-    wandb.finish()
+    if USE_WANDB:
+        wandb.finish()
 
 
 def train_head_detection(epochs: int = 50, device: str = "auto", verbose: bool = False, **kwargs):
@@ -320,77 +322,40 @@ def train_race_classifier(
     opt = torch.optim.Adam(model.parameters(), lr=lr) if optimizer == "adam" else torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum)
 
     train_loader, test_loader = load_dataset("race", workers=workers, batch_size=batch_size)
-    wandb.init(
-        project="race-classifier",
-        name=f"{run_uuid}",
-        config={
-            "epochs": epochs,
-            "batch_size": batch_size,
-            "device": device,
-            "optimizer": str(opt),
-            "lr": lr,
-            "loss": "cross_entropy with reduction=sum",
-            "dataset": "race dataset",
-            "architecture": str(model),
-        },
-    )
+
+    if USE_WANDB:
+        wandb.init(
+            project="race-classifier",
+            name=f"{run_uuid}",
+            config={
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "device": device,
+                "optimizer": str(opt),
+                "lr": lr,
+                "loss": "cross_entropy with reduction=sum",
+                "dataset": "race dataset",
+                "architecture": str(model),
+            },
+        )
 
     print_model_summary(model, input_size=(1, 3, 256, 256), verbose=verbose)
 
     min_loss = 10000000
     for epoch in range(epochs):
-        train_loss = 0.0
-        train_acc = 0.0
-        model.train()
+        train_loss, train_acc = train(model, train_loader, criterion, opt, epoch, epochs, device, verbose=verbose)
+        val_loss, val_acc = validate(model, test_loader, criterion, epoch, epochs, device, verbose=verbose)
 
-        t = tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Training Epoch {epoch + 1}/{epochs}", disable=not verbose)
-        for i, (inputs, labels) in t:
-            inputs, labels = inputs.to(device), labels.to(device)
+        if USE_WANDB:
+            wandb.log({"val_loss": val_loss, "val_acc": val_acc, "train_loss": train_loss, "train_acc": train_acc})
 
-            opt.zero_grad()
-
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            opt.step()
-
-            train_loss += loss.item()
-            outputs = torch.softmax(outputs, dim=1)
-            pred = outputs.argmax(dim=1, keepdim=True)
-            train_acc += pred.eq(labels.view_as(pred)).sum().item()
-
-            t.set_postfix(loss=train_loss / ((i + 1) * train_loader.batch_size), acc=train_acc / ((i + 1) * train_loader.batch_size))
-
-        val_loss, val_acc = 0.0, 0.0
-        model.eval()
-        with torch.no_grad():
-            t = tqdm(enumerate(test_loader), total=len(test_loader), desc=f"Validation Epoch {epoch + 1}/{epochs}", disable=not verbose)
-            for i, (inputs, labels) in t:
-                inputs, labels = inputs.to(device), labels.to(device)
-
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-
-                val_loss += loss.item()
-                outputs = torch.softmax(outputs, dim=1)
-                pred = outputs.argmax(dim=1, keepdim=True)
-                val_acc += pred.eq(labels.view_as(pred)).sum().item()
-
-                t.set_postfix(loss=val_loss / ((i + 1) * test_loader.batch_size), acc=val_acc / ((i + 1) * test_loader.batch_size))
-
-        tt_loss = val_loss / len(test_loader.dataset)
-        tt_acc = val_acc / len(test_loader.dataset)
-        t_loss = train_loss / len(train_loader.dataset)
-        t_acc = train_acc / len(train_loader.dataset)
-
-        wandb.log({"val_loss": tt_loss, "val_acc": tt_acc, "train_loss": t_loss, "train_acc": t_acc})
-
-        if tt_loss < min_loss:
-            min_loss = tt_loss
+        if val_loss < min_loss:
+            min_loss = val_loss
             torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"race_classifier_{run_uuid}.pth"))
 
     torch.save(model.state_dict(), os.path.join(MODELS_DIR, f"race_classifier_{run_uuid}_final.pth"))
-    wandb.finish()
+    if USE_WANDB:
+        wandb.finish()
 
 
 def __parse_args() -> argparse.Namespace:
@@ -404,14 +369,18 @@ def __parse_args() -> argparse.Namespace:
     parser.add_argument("--optimizer", "-o", type=str, default="adam", help="Optimizer", choices=["adam", "sgd"])
     parser.add_argument("--device", "-d", type=str, default="auto", help="Device to train on")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose mode")
+    parser.add_argument("--wandb", "-wdb", action="store_true", help="Log to wandb")
     parser.add_argument("--model-version", "-mv", type=str, default="v1", help="Model version", choices=["v1", "v2"])
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    import wandb
+USE_WANDB = False
 
+if __name__ == "__main__":
     args = __parse_args()
+    USE_WANDB = args.wandb
+    if USE_WANDB:
+        import wandb
     model_train_map: Dict[str, Callable] = {
         "catdog": train_dogcat_classifier,
         "race": train_race_classifier,

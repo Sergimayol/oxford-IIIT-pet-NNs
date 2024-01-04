@@ -79,7 +79,7 @@ def race_bench(test_data: DataLoader, device: str = "auto", model_path: str = No
     acc = 0.0
     with Profiling(enabled=profile):
         st = time.perf_counter_ns()
-        for img, label in tqdm(test_data, desc="CatDog benchmark", total=len(test_data), disable=not verbose):
+        for img, label in tqdm(test_data, desc="Race benchmark", total=len(test_data), disable=not verbose):
             img, label = img.to(device), label.to(device)
             with torch.no_grad():
                 outputs = model(img)
