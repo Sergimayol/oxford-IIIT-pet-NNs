@@ -1,9 +1,10 @@
+"""Test File nothing to see here :D. If you want to see the real model samples, go to notebooks/samples.ipynb"""
 import os
 import torch
 from torchvision import transforms
 import matplotlib.pyplot as plt
 
-from model import AnimalSegmentationPretained2, CatDogClassifier, AnimalSegmentationPretained
+from model import AnimalSegmentation, AnimalSegmentationPretained2, CatDogClassifier, AnimalSegmentationPretained
 from train import get_animalseg_dataset
 from utils import DATA_DIR, read_image, MODELS_DIR
 
@@ -32,23 +33,25 @@ def visualize_convolutions(model, input_image, layer_indices=None):
 
         for i in range(rows):
             for j in range(cols):
-                idx = i * cols + j 
+                idx = i * cols + j
                 if idx < num_layers:
-                    axes[i, j].imshow(activations[idx], cmap='viridis')
-                    axes[i, j].axis('off')
-                    axes[i, j].set_title(f'Channel {layer_indices[idx]}')
+                    axes[i, j].imshow(activations[idx], cmap="viridis")
+                    axes[i, j].axis("off")
+                    axes[i, j].set_title(f"Channel {layer_indices[idx]}")
 
         plt.show()
 
     return model.last_conv_output  # Devuelve la salida de la última capa convolucional
 
+
 def trimap2f(t, trimap):
     return (t(trimap) * 255.0 - 1) / 2
+
 
 if __name__ == "__main__":
     r"""
     import cv2
-    from torchvision import transforms 
+    from torchvision import transforms
 
     # Ruta de la imagen del trimap
     trimap_path = r"C:\Users\Sergi\Documents\GitHub\oxford-IIIT-pet-NNs\data\annotations\trimaps\Abyssinian_1.png"
@@ -119,7 +122,7 @@ if __name__ == "__main__":
         print(output)
         _, predicted = torch.max(output.data, 1)
         print(label_map[predicted.item()])
-        
+
         output = model(img2)
         output = torch.softmax(output, dim=1)
         print(output)
@@ -196,12 +199,15 @@ if __name__ == "__main__":
     cv2.destroyAllWindows()
 
     """
-    #model = AnimalSegmentationPretained()
-    model = AnimalSegmentationPretained2()
-    #model = torch.hub.load("pytorch/vision:v0.10.0", "fcn_resnet50", pretrained=True)
+    model = AnimalSegmentation()
+    # model = AnimalSegmentationPretained()
+    # model = AnimalSegmentationPretained2()
+    # model = torch.hub.load("pytorch/vision:v0.10.0", "fcn_resnet50", pretrained=True)
     model.to("cuda")
     path = os.path.join(MODELS_DIR, "animal_segmentation_983842c5-885a-4ca7-9642-20ae324fbb40.pth")
     path = os.path.join(MODELS_DIR, "animal_segmentation_e460a04b-fd87-479f-a0d5-a36392ccc882.pth")
+    path = os.path.join(MODELS_DIR, "animal_segmentation_618f1d01-19b5-4eea-9c79-ebc3414e817a.pth")
+    path = os.path.join(MODELS_DIR, "animal_segmentation_0e3cb2a4-e49d-4f27-9a89-56304f6e7b7b.pth")
     model.load_state_dict(torch.load(path))
     model.eval()
     img1 = read_image(os.path.join(DATA_DIR, "tests", "a.jpg"))
@@ -219,11 +225,40 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         output = model(img1)[0]
-        plt.imshow(output.cpu().numpy().squeeze())
+        # Plot size to size the original image and the output
+        plt.figure(figsize=(15, 5))
+        plt.subplot(1, 2, 1)
+        plt.imshow(img1.squeeze().cpu().numpy().transpose(1, 2, 0))
+        plt.title("Input Image")
+        plt.axis("off")
+        plt.subplot(1, 2, 2)
+        plt.imshow(output.squeeze().cpu().numpy())
+        plt.title("Output Image")
+        plt.axis("off")
         plt.show()
+
         output = model(img2)[0]
-        plt.imshow(output.cpu().numpy().squeeze())
+        # Plot size to size the original image and the output
+        plt.figure(figsize=(15, 5))
+        plt.subplot(1, 2, 1)
+        plt.imshow(img2.squeeze().cpu().numpy().transpose(1, 2, 0))
+        plt.title("Input Image")
+        plt.axis("off")
+        plt.subplot(1, 2, 2)
+        plt.imshow(output.squeeze().cpu().numpy())
+        plt.title("Output Image")
+        plt.axis("off")
         plt.show()
+
         output = model(img3)[0]
-        plt.imshow(output.cpu().numpy().squeeze())
+        # Plot size to size the original image and the output
+        plt.figure(figsize=(15, 5))
+        plt.subplot(1, 2, 1)
+        plt.imshow(img3.squeeze().cpu().numpy().transpose(1, 2, 0))
+        plt.title("Input Image")
+        plt.axis("off")
+        plt.subplot(1, 2, 2)
+        plt.imshow(output.squeeze().cpu().numpy())
+        plt.title("Output Image")
+        plt.axis("off")
         plt.show()
