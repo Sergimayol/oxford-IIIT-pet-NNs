@@ -22,7 +22,7 @@
 -   [x] Clasificación perro/gato
 -   [x] Clasificación de razas
 -   [x] Detección de cabezas
--   [ ] Segmentación de animales
+-   [x] Segmentación de animales
 
 ## Requisitos
 
