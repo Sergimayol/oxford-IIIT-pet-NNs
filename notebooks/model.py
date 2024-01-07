@@ -146,7 +146,7 @@ class FCNHead(nn.Sequential):
 
 
 class AnimalSegmentationPretained2(nn.Module):
-    """Animal segmentation model. Using pretrained model from mateuszbuda/brain-segmentation-pytorch"""
+    """Animal segmentation model. Using pretrained model fcn_resnet50 from pytorch"""
 
     def __init__(self):
         super(AnimalSegmentationPretained2, self).__init__()
